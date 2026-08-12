@@ -381,11 +381,11 @@ app.get("/api/cartoes", async (req, res) => {
 });
 
 app.post("/api/cartoes", async (req, res) => {
-  const { id, nome, cor } = req.body;
+  const { id, nome, cor, diaVencimento } = req.body;
   try {
     const { rows } = await pool.query(
-      `INSERT INTO cartoes (id, nome, cor) VALUES ($1,$2,$3) RETURNING *`,
-      [id, nome, cor || null]
+      `INSERT INTO cartoes (id, nome, cor, dia_vencimento) VALUES ($1,$2,$3,$4) RETURNING *`,
+      [id, nome, cor || null, diaVencimento != null ? diaVencimento : null]
     );
     res.status(201).json(rows[0]);
   } catch (e) {
@@ -585,6 +585,42 @@ app.delete("/api/clientes/:id", async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Erro ao excluir cliente" });
+  }
+});
+
+// ---------- PAGAMENTOS DE FATURA DO CARTÃO ----------
+app.get("/api/pagamentos-fatura", async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM pagamentos_fatura ORDER BY data DESC");
+    res.json(rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao buscar pagamentos de fatura" });
+  }
+});
+
+app.post("/api/pagamentos-fatura", async (req, res) => {
+  const { id, cartaoId, contaId, mes, valor, data, movimentacaoId } = req.body;
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO pagamentos_fatura (id, cartao_id, conta_id, mes, valor, data, movimentacao_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [id, cartaoId, contaId, mes, valor || 0, data, movimentacaoId || null]
+    );
+    res.status(201).json(rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao registrar pagamento da fatura" });
+  }
+});
+
+app.delete("/api/pagamentos-fatura/:id", async (req, res) => {
+  try {
+    await pool.query("DELETE FROM pagamentos_fatura WHERE id = $1", [req.params.id]);
+    res.status(204).end();
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao excluir pagamento da fatura" });
   }
 });
 
