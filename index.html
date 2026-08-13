@@ -88,6 +88,7 @@ const Filter = (p) => <Svg {...p}><polygon points="22 3 2 3 10 12.46 10 19 14 21
 const LogOut = (p) => <Svg {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></Svg>;
 const MessageCircle = (p) => <Svg {...p}><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></Svg>;
 const Download = (p) => <Svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></Svg>;
+const Star = (p) => <Svg {...p}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></Svg>;
 
 // ====== DADOS FIXOS ======
 const STATUSES = [
@@ -442,6 +443,7 @@ function mapConta(row) {
     id: row.id, nome: row.nome,
     saldoInicial: parseFloat(row.saldo_inicial) || 0,
     tipo: row.tipo || "pf",
+    principal: row.principal === true,
   };
 }
 function mapMovimentacao(row) {
@@ -1361,7 +1363,7 @@ function GraficoEntradasSaidas({ dados }) {
 
 function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
                              despesas, onAddDespesa, onEditDespesa, onDeleteDespesa,
-                             contas, movimentacoes, onAddConta, onDeleteConta, onAddMov, onDeleteMov }) {
+                             contas, movimentacoes, onAddConta, onDeleteConta, onAddMov, onDeleteMov, onSetPrincipal }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [showAddGasto, setShowAddGasto] = useState(false);
@@ -1397,9 +1399,10 @@ function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
   const lucroAnt = totalRecebidoAnt - totalCustoAnt - totalGastosAnt;
   const labelMesAnt = monthLabelShort(mesAnterior);
 
-  // Contas da empresa (PJ) — saldo é informativo, não entra no cálculo do lucro
+  // Contas da empresa (PJ). A conta do negócio recebe recebimentos e gastos automaticamente.
   const contasPJ = (contas || []).filter((c) => c.tipo === "pj");
-  const totalContasPJ = contasPJ.reduce((s, c) => s + saldoDaConta(c, movimentacoes || []), 0);
+  const fluxoNegocio = fluxoNegocioConta(financeiro, despesas);
+  const totalContasPJ = contasPJ.reduce((s, c) => s + saldoDaConta(c, movimentacoes || [], fluxoNegocio), 0);
 
   let visiveis = sorted;
   if (filtro === "pago") visiveis = sorted.filter((f) => f.pago);
@@ -1595,6 +1598,7 @@ function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
       <div className="mt-6 pt-5" style={{ borderTop: `1px solid ${COLORS.line}` }}>
         <ContasView contas={contasPJ} movimentacoes={movimentacoes || []}
                     tipo="pj" titulo="Contas da empresa" tituloTotal="Total nas contas da empresa (PJ)"
+                    fluxoNegocio={fluxoNegocio} onSetPrincipal={onSetPrincipal}
                     onAddConta={onAddConta} onDeleteConta={onDeleteConta}
                     onAddMov={onAddMov} onDeleteMov={onDeleteMov} />
       </div>
@@ -2233,10 +2237,47 @@ function CartoesView({ cartoes, compras, onAddCartao, onDeleteCartao, onAddCompr
 }
 
 // ====== CONTAS PESSOAIS ======
-function saldoDaConta(conta, movimentacoes) {
-  return (movimentacoes || [])
+function saldoDaConta(conta, movimentacoes, fluxoNegocio) {
+  let saldo = (movimentacoes || [])
     .filter((m) => m.contaId === conta.id)
     .reduce((s, m) => s + (m.tipo === "saida" ? -(m.valor || 0) : (m.valor || 0)), conta.saldoInicial || 0);
+  // Na conta do negócio, os recebimentos e gastos da empresa entram automaticamente
+  if (conta.principal && fluxoNegocio) {
+    saldo += fluxoNegocio.reduce((s, m) => s + (m.tipo === "saida" ? -(m.valor || 0) : (m.valor || 0)), 0);
+  }
+  return saldo;
+}
+
+// Lançamentos automáticos da conta do negócio: recebimentos (entradas) e gastos da empresa (saídas).
+// São calculados, não salvos — então nunca duplicam e somem se você apagar o recebimento/gasto.
+function fluxoNegocioConta(financeiro, despesas) {
+  const movs = [];
+  (financeiro || []).forEach((f) => {
+    if (f.pago && (f.valorPago || 0) !== 0) {
+      movs.push({ id: "auto-rec-" + f.id, auto: true, tipo: "entrada", valor: f.valorPago || 0,
+                  descricao: "Recebido · " + f.cliente
+                    + (f.totalParcelas > 1 ? ` (comissão ${f.parcela}/${f.totalParcelas})` : ""),
+                  data: f.data });
+    }
+  });
+  const mesAtual = monthKey(todayStr());
+  (despesas || []).forEach((d) => {
+    if (d.tipo === "negocio_avulso") {
+      movs.push({ id: "auto-gasto-" + d.id, auto: true, tipo: "saida", valor: d.valor || 0,
+                  descricao: "Gasto · " + d.titulo, data: d.data });
+    } else if (d.tipo === "negocio_fixa") {
+      // Conta fixa recorre todo mês, do início até o mês atual
+      const dia = (d.data || "").slice(8, 10) || "01";
+      let mk = monthKey(d.data);
+      let guard = 0;
+      while (mk <= mesAtual && guard < 240) {
+        movs.push({ id: "auto-fix-" + d.id + "-" + mk, auto: true, tipo: "saida", valor: d.valor || 0,
+                    descricao: "Conta fixa · " + d.titulo, data: mk + "-" + dia });
+        mk = addMonths(mk, 1); guard++;
+      }
+    }
+  });
+  return movs.sort((a, b) => (b.data || "").localeCompare(a.data || ""));
 }
 
 function AddContaModal({ onClose, onSave, tipo }) {
@@ -2301,12 +2342,13 @@ function AddMovimentacaoModal({ conta, onClose, onSave }) {
 }
 
 function ContasView({ contas, movimentacoes, onAddConta, onDeleteConta, onAddMov, onDeleteMov,
-                      tipo, titulo, tituloTotal, mostrarTotal }) {
+                      tipo, titulo, tituloTotal, mostrarTotal, fluxoNegocio, onSetPrincipal }) {
   const [showAddConta, setShowAddConta] = useState(false);
   const [movDaConta, setMovDaConta] = useState(null);
   const [aberta, setAberta] = useState(null);
+  const podeDesignar = tipo === "pj" && typeof onSetPrincipal === "function";
 
-  const totalGeral = contas.reduce((s, c) => s + saldoDaConta(c, movimentacoes), 0);
+  const totalGeral = contas.reduce((s, c) => s + saldoDaConta(c, movimentacoes, fluxoNegocio), 0);
 
   return (
     <div>
@@ -2333,25 +2375,40 @@ function ContasView({ contas, movimentacoes, onAddConta, onDeleteConta, onAddMov
 
       <div className="space-y-2">
         {contas.map((c) => {
-          const saldo = saldoDaConta(c, movimentacoes);
-          const movs = movimentacoes.filter((m) => m.contaId === c.id)
-            .sort((a, b) => (b.data || "").localeCompare(a.data || ""));
+          const saldo = saldoDaConta(c, movimentacoes, fluxoNegocio);
+          const manuais = movimentacoes.filter((m) => m.contaId === c.id);
+          const autos = c.principal ? (fluxoNegocio || []) : [];
+          const movs = [...manuais, ...autos].sort((a, b) => (b.data || "").localeCompare(a.data || ""));
           const estaAberta = aberta === c.id;
           return (
-            <div key={c.id} className="rounded-lg" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
-              <div className="p-3 flex items-center gap-3">
+            <div key={c.id} className="rounded-lg" style={{ backgroundColor: COLORS.panel,
+                 border: c.principal ? `1.5px solid ${COLORS.camel}` : `1px solid ${COLORS.line}` }}>
+              <div className="p-3 flex items-center gap-2">
                 <button onClick={() => setAberta(estaAberta ? null : c.id)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
                   <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: COLORS.burgundy + "14" }}>
                     <Landmark size={16} color={COLORS.burgundy} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold truncate" style={{ color: COLORS.ink }}>{c.nome}</div>
+                    <div className="text-sm font-semibold truncate flex items-center gap-1.5" style={{ color: COLORS.ink }}>
+                      {c.nome}
+                      {c.principal && (
+                        <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold whitespace-nowrap"
+                              style={{ backgroundColor: COLORS.camel + "26", color: COLORS.camelDeep }}>CONTA DO NEGÓCIO</span>
+                      )}
+                    </div>
                     <div className="text-xs" style={{ color: COLORS.inkSoft }}>{movs.length} movimentação(ões)</div>
                   </div>
                 </button>
                 <div className="text-sm font-bold flex-shrink-0" style={{ color: saldo < 0 ? COLORS.red : COLORS.ink, fontFamily: "ui-monospace, monospace" }}>
                   {fmtMoney(saldo)}
                 </div>
+                {podeDesignar && (
+                  <button onClick={() => onSetPrincipal(c.principal ? null : c.id)}
+                          className="p-1.5 rounded-lg hover:bg-black/5 flex-shrink-0"
+                          title={c.principal ? "Deixar de ser a conta do negócio" : "Definir como conta do negócio (recebe automaticamente)"}>
+                    <Star size={15} color={c.principal ? COLORS.camelDeep : COLORS.inkSoft} fill={c.principal ? COLORS.camel : "none"} />
+                  </button>
+                )}
                 <button onClick={() => setMovDaConta(c)} className="p-1.5 rounded-lg hover:bg-black/5 flex-shrink-0" title="Lançar movimentação">
                   <Plus size={15} color={COLORS.inkSoft} />
                 </button>
@@ -2362,6 +2419,11 @@ function ContasView({ contas, movimentacoes, onAddConta, onDeleteConta, onAddMov
 
               {estaAberta && (
                 <div className="px-3 pb-3">
+                  {c.principal && (
+                    <p className="text-[11px] mb-1.5 px-1" style={{ color: COLORS.camelDeep }}>
+                      Recebimentos e gastos da empresa entram aqui sozinhos (marcados como "auto").
+                    </p>
+                  )}
                   <div className="flex items-center justify-between text-[11px] py-1.5 px-2 rounded-lg mb-1" style={{ backgroundColor: "#F1F3F6", color: COLORS.inkSoft }}>
                     <span>Saldo inicial</span>
                     <span style={{ fontFamily: "ui-monospace, monospace" }}>{fmtMoney(c.saldoInicial)}</span>
@@ -2371,14 +2433,19 @@ function ContasView({ contas, movimentacoes, onAddConta, onDeleteConta, onAddMov
                     <div key={m.id} className="flex items-center gap-2 text-xs py-1.5" style={{ borderTop: `1px dashed ${COLORS.line}` }}>
                       <span className="flex-1 min-w-0 truncate" style={{ color: COLORS.ink }}>
                         {m.descricao || (m.tipo === "entrada" ? "Entrada" : "Saída")}
+                        {m.auto && <span className="ml-1 px-1 py-0.5 rounded text-[9px] font-bold" style={{ backgroundColor: COLORS.line, color: COLORS.inkSoft }}>auto</span>}
                         <span style={{ color: COLORS.inkSoft }}> · {fmtDatePt(m.data)}</span>
                       </span>
                       <span className="font-bold flex-shrink-0" style={{ color: m.tipo === "entrada" ? COLORS.green : COLORS.red, fontFamily: "ui-monospace, monospace" }}>
                         {m.tipo === "entrada" ? "+" : "−"} {fmtMoney(m.valor)}
                       </span>
-                      <button onClick={() => onDeleteMov(m.id)} className="p-1 rounded hover:bg-black/5 flex-shrink-0" title="Excluir">
-                        <Trash2 size={12} color={COLORS.inkSoft} />
-                      </button>
+                      {m.auto ? (
+                        <span className="w-6 flex-shrink-0" />
+                      ) : (
+                        <button onClick={() => onDeleteMov(m.id)} className="p-1 rounded hover:bg-black/5 flex-shrink-0" title="Excluir">
+                          <Trash2 size={12} color={COLORS.inkSoft} />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -2610,8 +2677,9 @@ function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes }) {
     });
   }
 
+  const fluxoNegocio = fluxoNegocioConta(financeiro, despesas);
   const totalPJ = (contas || []).filter((c) => c.tipo === "pj")
-    .reduce((s, c) => s + saldoDaConta(c, movimentacoes || []), 0);
+    .reduce((s, c) => s + saldoDaConta(c, movimentacoes || [], fluxoNegocio), 0);
   const totalPF = (contas || []).filter((c) => (c.tipo || "pf") === "pf")
     .reduce((s, c) => s + saldoDaConta(c, movimentacoes || []), 0);
 
@@ -2677,7 +2745,7 @@ function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes }) {
 
 function FinanceView({ financeiro, onAddFinanceiro, onEditFinanceiro, onDeleteFinanceiro, onMarcarPago,
                         despesas, onAddDespesa, onEditDespesa, onDeleteDespesa,
-                        contas, movimentacoes, onAddConta, onDeleteConta, onAddMov, onDeleteMov,
+                        contas, movimentacoes, onAddConta, onDeleteConta, onAddMov, onDeleteMov, onSetPrincipal,
                         pagamentosFatura, onPagarFatura, onDesfazerPagamento,
                         cartoes, comprasCartao, onAddCartao, onDeleteCartao, onAddCompra, onEditCompra, onDeleteCompra }) {
   const [subTab, setSubTab] = useState("visao");
@@ -2710,7 +2778,7 @@ function FinanceView({ financeiro, onAddFinanceiro, onEditFinanceiro, onDeleteFi
                             onDelete={onDeleteFinanceiro} onMarcarPago={onMarcarPago}
                             despesas={despesas} onAddDespesa={onAddDespesa} onEditDespesa={onEditDespesa} onDeleteDespesa={onDeleteDespesa}
                             contas={contas} movimentacoes={movimentacoes} onAddConta={onAddConta} onDeleteConta={onDeleteConta}
-                            onAddMov={onAddMov} onDeleteMov={onDeleteMov} />
+                            onAddMov={onAddMov} onDeleteMov={onDeleteMov} onSetPrincipal={onSetPrincipal} />
       )}
       {subTab === "pessoal" && (
         <DespesasView despesas={despesas} onAdd={onAddDespesa} onEdit={onEditDespesa} onDelete={onDeleteDespesa}
@@ -3448,6 +3516,15 @@ function App() {
     try { await apiDelete(`/api/contas/${id}`); }
     catch (e) { console.error(e); setErro("Não foi possível excluir a conta."); }
   };
+  // Define (ou tira) a conta do negócio. Só uma pode ser principal por vez.
+  const definirContaPrincipal = async (id) => {
+    const anteriores = contas.filter((c) => c.principal && c.id !== id);
+    setContas((prev) => prev.map((c) => ({ ...c, principal: c.id === id })));
+    try {
+      for (const c of anteriores) await apiPatch(`/api/contas/${c.id}`, { principal: false });
+      if (id) await apiPatch(`/api/contas/${id}`, { principal: true });
+    } catch (e) { console.error(e); setErro("Não foi possível definir a conta do negócio."); }
+  };
   const addMovimentacao = async (item) => {
     setMovimentacoes((prev) => [item, ...prev]);
     try { await apiPost("/api/movimentacoes", item); }
@@ -3581,7 +3658,7 @@ function App() {
             onDeleteFinanceiro={deleteFinanceiro} onMarcarPago={marcarPago}
             despesas={despesas} onAddDespesa={addDespesa} onEditDespesa={editDespesa} onDeleteDespesa={deleteDespesa}
             contas={contas} movimentacoes={movimentacoes} onAddConta={addConta} onDeleteConta={deleteConta}
-            onAddMov={addMovimentacao} onDeleteMov={deleteMovimentacao}
+            onAddMov={addMovimentacao} onDeleteMov={deleteMovimentacao} onSetPrincipal={definirContaPrincipal}
             pagamentosFatura={pagamentosFatura} onPagarFatura={pagarFatura} onDesfazerPagamento={desfazerPagamentoFatura}
             cartoes={cartoes} comprasCartao={comprasCartao} onAddCartao={addCartao} onDeleteCartao={deleteCartao}
             onAddCompra={addCompra} onEditCompra={editCompra} onDeleteCompra={deleteCompra}

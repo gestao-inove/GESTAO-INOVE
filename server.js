@@ -636,11 +636,11 @@ app.get("/api/contas", async (req, res) => {
 });
 
 app.post("/api/contas", async (req, res) => {
-  const { id, nome, saldoInicial, tipo } = req.body;
+  const { id, nome, saldoInicial, tipo, principal } = req.body;
   try {
     const { rows } = await pool.query(
-      `INSERT INTO contas_pf (id, nome, saldo_inicial, tipo) VALUES ($1,$2,$3,$4) RETURNING *`,
-      [id, nome, saldoInicial || 0, tipo || "pf"]
+      `INSERT INTO contas_pf (id, nome, saldo_inicial, tipo, principal) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [id, nome, saldoInicial || 0, tipo || "pf", principal === true]
     );
     res.status(201).json(rows[0]);
   } catch (e) {
@@ -650,7 +650,7 @@ app.post("/api/contas", async (req, res) => {
 });
 
 app.patch("/api/contas/:id", async (req, res) => {
-  const fields = { nome: req.body.nome, saldo_inicial: req.body.saldoInicial, tipo: req.body.tipo };
+  const fields = { nome: req.body.nome, saldo_inicial: req.body.saldoInicial, tipo: req.body.tipo, principal: req.body.principal };
   const keys = Object.keys(fields).filter((k) => fields[k] !== undefined);
   if (keys.length === 0) return res.status(400).json({ error: "Nada para atualizar" });
   const setClause = keys.map((k, i) => `${k} = $${i + 1}`).join(", ");
