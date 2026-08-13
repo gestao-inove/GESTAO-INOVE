@@ -377,7 +377,35 @@ function mapFinanceiro(row) {
     valorPago: parseFloat(row.valor_pago) || 0, custo: parseFloat(row.custo) || 0,
     forma: row.forma || "", data: row.data ? String(row.data).slice(0, 10) : "",
     pago: row.pago !== false, atendimentoId: row.atendimento_id,
+    parcela: row.parcela != null ? Number(row.parcela) : null,
+    totalParcelas: row.total_parcelas != null ? Number(row.total_parcelas) : null,
   };
+}
+// Soma meses a uma data completa (YYYY-MM-DD), mantendo o dia quando possível
+function addMesesData(dateStr, n) {
+  const base = (dateStr || todayStr()).slice(0, 10);
+  const [y, m, d] = base.split("-").map(Number);
+  const dt = new Date(y, (m - 1) + n, d);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+}
+// A comissão do seguro vira N lançamentos no financeiro (um por mês, "a receber")
+function montarLancamentosComissao(item) {
+  const n = Math.max(1, Math.min(12, parseInt(item.parcelasComissao, 10) || 1));
+  const total = item.valorComissao || 0;
+  const base = item.dataAgendamento || todayStr();
+  const valorBase = Math.floor((total / n) * 100) / 100;
+  const lancs = [];
+  for (let k = 1; k <= n; k++) {
+    const valor = k === n ? Math.round((total - valorBase * (n - 1)) * 100) / 100 : valorBase;
+    lancs.push({
+      id: uid(), cliente: item.cliente, categoria: item.categoria, subtipo: item.subtipo,
+      valorPago: valor, custo: 0, forma: item.forma || "",
+      data: n === 1 ? base : addMesesData(base, k - 1),
+      pago: n === 1 ? (item.pagamento !== "pendente") : false,
+      atendimentoId: item.id, parcela: k, totalParcelas: n,
+    });
+  }
+  return lancs;
 }
 function mapDespesa(row) {
   return {
@@ -533,6 +561,7 @@ function AtendimentoForm({ item, onSubmit, submitLabel, comissaoInicial, categor
     item && item.comissao != null ? String(item.comissao) : (comissaoInicial != null ? String(comissaoInicial) : "")
   );
   const [pagamento, setPagamento] = useState(item && item.pagamento ? item.pagamento : "pago");
+  const [parcelasComissao, setParcelasComissao] = useState(item && item.parcelasComissao ? String(item.parcelasComissao) : "1");
   const [forma, setForma] = useState(item && item.forma ? item.forma : FORMAS_PAGAMENTO[0]);
   const [notas, setNotas] = useState(item ? item.notas : "");
   // Seguradora: se não estiver na lista, cai no campo livre ("Outra")
@@ -545,6 +574,8 @@ function AtendimentoForm({ item, onSubmit, submitLabel, comissaoInicial, categor
   const valorNum = parseFloat(valor) || 0;
   const comissaoNum = parseFloat(comissao) || 0;
   const valorComissao = Math.round(valorNum * comissaoNum) / 100;
+  const nParcelas = Math.max(1, Math.min(12, parseInt(parcelasComissao, 10) || 1));
+  const valorParcelaComissao = Math.round((valorComissao / nParcelas) * 100) / 100;
 
   const submit = () => {
     if (!cliente.trim()) return;
@@ -554,6 +585,7 @@ function AtendimentoForm({ item, onSubmit, submitLabel, comissaoInicial, categor
       valor: valor ? parseFloat(valor) : null,
       comissao: categoria === "seguro" && comissao ? comissaoNum : null,
       valorComissao: categoria === "seguro" ? valorComissao : null,
+      parcelasComissao: categoria === "seguro" ? nParcelas : null,
       seguradora: categoria === "seguro"
         ? (seguradora === "__outra__" ? seguradoraOutra.trim() : seguradora)
         : "",
@@ -623,14 +655,24 @@ function AtendimentoForm({ item, onSubmit, submitLabel, comissaoInicial, categor
                      onChange={(e) => setComissao(e.target.value)} placeholder="15" />
             </Field>
           </div>
+          <Field label="Recebo a comissão em quantas vezes?">
+            <input type="number" min="1" max="12" style={inputStyle} value={parcelasComissao}
+                   onChange={(e) => setParcelasComissao(e.target.value)} placeholder="1" />
+          </Field>
           {valorNum > 0 && comissaoNum > 0 && (
-            <div className="rounded-lg px-3 py-2 mb-2 flex items-center justify-between"
-                 style={{ backgroundColor: COLORS.green + "14" }}>
-              <span className="text-xs font-medium" style={{ color: COLORS.green }}>Você recebe (comissão)</span>
-              <span className="text-sm font-bold" style={{ color: COLORS.green, fontFamily: "ui-monospace, monospace" }}>{fmtMoney(valorComissao)}</span>
+            <div className="rounded-lg px-3 py-2 mb-2" style={{ backgroundColor: COLORS.green + "14" }}>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium" style={{ color: COLORS.green }}>Você recebe (comissão)</span>
+                <span className="text-sm font-bold" style={{ color: COLORS.green, fontFamily: "ui-monospace, monospace" }}>{fmtMoney(valorComissao)}</span>
+              </div>
+              {nParcelas > 1 && (
+                <div className="text-[11px] mt-1" style={{ color: COLORS.green }}>
+                  {nParcelas}x de {fmtMoney(valorParcelaComissao)} · uma a cada mês
+                </div>
+              )}
             </div>
           )}
-          {valorNum > 0 && comissaoNum > 0 && (
+          {valorNum > 0 && comissaoNum > 0 && nParcelas === 1 && (
             <React.Fragment>
               <Field label="Situação">
                 <div className="flex gap-2">
@@ -651,6 +693,11 @@ function AtendimentoForm({ item, onSubmit, submitLabel, comissaoInicial, categor
                   : `${fmtMoney(valorComissao)} entra em A receber e não soma no Recebido até você marcar como pago.`}
               </p>
             </React.Fragment>
+          )}
+          {valorNum > 0 && comissaoNum > 0 && nParcelas > 1 && (
+            <p className="text-[11px]" style={{ color: COLORS.inkSoft }}>
+              As {nParcelas} parcelas entram em "A receber", uma em cada mês. Marque cada uma como recebida quando a seguradora pagar.
+            </p>
           )}
         </div>
       )}
@@ -1436,7 +1483,15 @@ function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
               <tbody>
                 {visiveis.map((f) => (
                   <tr key={f.id} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
-                    <td className="px-3 py-2 text-xs font-semibold" style={{ color: COLORS.ink }}>{f.cliente}</td>
+                    <td className="px-3 py-2 text-xs font-semibold" style={{ color: COLORS.ink }}>
+                      {f.cliente}
+                      {f.totalParcelas > 1 && (
+                        <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold whitespace-nowrap"
+                              style={{ backgroundColor: COLORS.burgundy + "12", color: COLORS.burgundy }}>
+                          comissão {f.parcela}/{f.totalParcelas}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-3 py-2"><Stamp categoria={f.categoria} subtipo={f.subtipo} /></td>
                     <td className="px-3 py-2 text-xs whitespace-nowrap" style={{ color: COLORS.inkSoft }}>
                       {fmtDatePt(f.data)}
@@ -3185,13 +3240,15 @@ function App() {
         setAgendamentos((prev) => [...prev, ag]);
         await apiPost("/api/agendamentos", ag);
       }
-      // No certificado entra o valor cheio; no seguro entra a comissão (valor × %).
-      // Certificado ainda em "Solicitado" não conta no financeiro — só quando avança de etapa.
-      const valorLanc = item.categoria === "seguro" ? (item.valorComissao || 0) : (item.valor || 0);
+      // Seguro: a comissão vira N parcelas (uma por mês). Certificado: valor cheio, uma vez.
       const aindaSolicitado = item.categoria === "certificado" && item.status === "solicitado";
-      if ((item.categoria === "certificado" || item.categoria === "seguro") && valorLanc > 0 && !aindaSolicitado) {
+      if (item.categoria === "seguro" && (item.valorComissao || 0) > 0) {
+        const lancs = montarLancamentosComissao(item);
+        setFinanceiro((prev) => [...lancs, ...prev]);
+        for (const l of lancs) await apiPost("/api/financeiro", l);
+      } else if (item.categoria === "certificado" && (item.valor || 0) > 0 && !aindaSolicitado) {
         const lanc = { id: uid(), cliente: item.cliente, categoria: item.categoria, subtipo: item.subtipo,
-                       valorPago: valorLanc, custo: 0, forma: item.forma || "",
+                       valorPago: item.valor, custo: 0, forma: item.forma || "",
                        data: item.dataAgendamento || todayStr(), pago: item.pagamento !== "pendente",
                        atendimentoId: item.id };
         setFinanceiro((prev) => [lanc, ...prev]);
@@ -3219,16 +3276,23 @@ function App() {
         }
       }
 
-      // Sincroniza o lançamento financeiro vinculado (cria se não existir, atualiza se já existir)
-      // No certificado entra o valor cheio; no seguro entra a comissão (valor × %)
-      const valorLancEdit = item.categoria === "seguro" ? (item.valorComissao || 0) : (item.valor || 0);
-      if ((item.categoria === "certificado" || item.categoria === "seguro") && valorLancEdit > 0) {
+      // Sincroniza o lançamento financeiro vinculado
+      if (item.categoria === "seguro" && (item.valorComissao || 0) > 0) {
+        const existentes = financeiro.filter((f) => f.atendimentoId === item.id);
+        // Se alguma parcela já foi recebida, não recria (evita perder o recebimento)
+        if (!existentes.some((f) => f.pago)) {
+          for (const f of existentes) await apiDelete(`/api/financeiro/${f.id}`);
+          const lancs = montarLancamentosComissao(item);
+          setFinanceiro((prev) => [...lancs, ...prev.filter((f) => f.atendimentoId !== item.id)]);
+          for (const l of lancs) await apiPost("/api/financeiro", l);
+        }
+      } else if (item.categoria === "certificado" && (item.valor || 0) > 0) {
         const existenteF = financeiro.find((f) => f.atendimentoId === item.id);
         const dadosF = { cliente: item.cliente, categoria: item.categoria, subtipo: item.subtipo,
-                         valorPago: valorLancEdit, forma: item.forma || "",
+                         valorPago: item.valor, forma: item.forma || "",
                          data: item.dataAgendamento || (existenteF ? existenteF.data : todayStr()),
                          pago: item.pagamento !== "pendente" };
-        const soSolicitado = item.categoria === "certificado" && item.status === "solicitado";
+        const soSolicitado = item.status === "solicitado";
         if (existenteF) {
           setFinanceiro((prev) => prev.map((f) => (f.id === existenteF.id ? { ...f, ...dadosF } : f)));
           await apiPatch(`/api/financeiro/${existenteF.id}`, dadosF);

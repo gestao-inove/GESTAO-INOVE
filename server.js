@@ -317,12 +317,12 @@ app.get("/api/financeiro", async (req, res) => {
 });
 
 app.post("/api/financeiro", async (req, res) => {
-  const { id, cliente, categoria, subtipo, valorPago, custo, forma, data, pago, atendimentoId } = req.body;
+  const { id, cliente, categoria, subtipo, valorPago, custo, forma, data, pago, atendimentoId, parcela, totalParcelas } = req.body;
   try {
     const { rows } = await pool.query(
-      `INSERT INTO financeiro (id, cliente, categoria, subtipo, valor_pago, custo, forma, data, pago, atendimento_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [id, cliente, categoria, subtipo, valorPago || 0, custo || 0, forma || null, data, pago !== false, atendimentoId || null]
+      `INSERT INTO financeiro (id, cliente, categoria, subtipo, valor_pago, custo, forma, data, pago, atendimento_id, parcela, total_parcelas)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      [id, cliente, categoria, subtipo, valorPago || 0, custo || 0, forma || null, data, pago !== false, atendimentoId || null, parcela != null ? parcela : null, totalParcelas != null ? totalParcelas : null]
     );
     res.status(201).json(rows[0]);
   } catch (e) {
