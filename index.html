@@ -2259,6 +2259,11 @@ function fluxoNegocioConta(financeiro, despesas) {
                     + (f.totalParcelas > 1 ? ` (comissão ${f.parcela}/${f.totalParcelas})` : ""),
                   data: f.data });
     }
+    // O custo do atendimento (ex: custo do certificado) sai da conta, para mostrar o valor real
+    if (f.pago && (f.custo || 0) > 0) {
+      movs.push({ id: "auto-custo-" + f.id, auto: true, tipo: "saida", valor: f.custo,
+                  descricao: "Custo · " + f.cliente, data: f.data });
+    }
   });
   const mesAtual = monthKey(todayStr());
   (despesas || []).forEach((d) => {
