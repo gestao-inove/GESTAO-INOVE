@@ -186,12 +186,12 @@ app.get("/api/atendimentos", async (req, res) => {
 });
 
 app.post("/api/atendimentos", async (req, res) => {
-  const { id, cliente, categoria, subtipo, horarioSolicitado, dataSolicitacao, dataAgendamento, horarioAgendamento, valor, custo, comissao, seguradora, pagamento, status, notas } = req.body;
+  const { id, cliente, categoria, subtipo, horarioSolicitado, dataSolicitacao, dataAgendamento, horarioAgendamento, valor, custo, documento, comissao, seguradora, pagamento, status, notas } = req.body;
   try {
     const { rows } = await pool.query(
-      `INSERT INTO atendimentos (id, cliente, categoria, subtipo, horario_solicitado, data_solicitacao, data_agendamento, horario_agendamento, valor, custo, comissao, seguradora, pagamento, status, notas)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
-      [id, cliente, categoria, subtipo, horarioSolicitado || null, dataSolicitacao || null, dataAgendamento || null, horarioAgendamento || null, valor != null ? valor : null, custo != null ? custo : null, comissao != null ? comissao : null, seguradora || null, pagamento || null, status || "iniciado", notas || null]
+      `INSERT INTO atendimentos (id, cliente, categoria, subtipo, horario_solicitado, data_solicitacao, data_agendamento, horario_agendamento, valor, custo, documento, comissao, seguradora, pagamento, status, notas)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+      [id, cliente, categoria, subtipo, horarioSolicitado || null, dataSolicitacao || null, dataAgendamento || null, horarioAgendamento || null, valor != null ? valor : null, custo != null ? custo : null, documento || null, comissao != null ? comissao : null, seguradora || null, pagamento || null, status || "iniciado", notas || null]
     );
     res.status(201).json(rows[0]);
   } catch (e) {
@@ -211,6 +211,7 @@ app.patch("/api/atendimentos/:id", async (req, res) => {
     horario_agendamento: req.body.horarioAgendamento,
     valor: req.body.valor != null ? req.body.valor : undefined,
     custo: req.body.custo != null ? req.body.custo : undefined,
+    documento: req.body.documento,
     comissao: req.body.comissao != null ? req.body.comissao : undefined,
     seguradora: req.body.seguradora,
     pagamento: req.body.pagamento,
@@ -241,6 +242,66 @@ app.delete("/api/atendimentos/:id", async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Erro ao excluir atendimento" });
+  }
+});
+
+// ---------- CONTATOS (base de clientes) ----------
+app.get("/api/contatos", async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM contatos ORDER BY nome");
+    res.json(rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao buscar contatos" });
+  }
+});
+
+app.post("/api/contatos", async (req, res) => {
+  const { id, nome, documento, telefone, email } = req.body;
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO contatos (id, nome, documento, telefone, email)
+       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [id, nome, documento || null, telefone || null, email || null]
+    );
+    res.status(201).json(rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao criar contato" });
+  }
+});
+
+app.patch("/api/contatos/:id", async (req, res) => {
+  const fields = {
+    nome: req.body.nome,
+    documento: req.body.documento,
+    telefone: req.body.telefone,
+    email: req.body.email,
+  };
+  const keys = Object.keys(fields).filter((k) => fields[k] !== undefined);
+  if (keys.length === 0) return res.status(400).json({ error: "Nada para atualizar" });
+  const setClause = keys.map((k, i) => `${k} = $${i + 1}`).join(", ");
+  const values = keys.map((k) => fields[k]);
+  values.push(req.params.id);
+  try {
+    const { rows } = await pool.query(
+      `UPDATE contatos SET ${setClause} WHERE id = $${values.length} RETURNING *`,
+      values
+    );
+    res.json(rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao atualizar contato" });
+  }
+});
+
+app.delete("/api/contatos/:id", async (req, res) => {
+  try {
+    await pool.query("DELETE FROM contatos WHERE id = $1", [req.params.id]);
+    res.status(204).end();
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao excluir contato" });
   }
 });
 

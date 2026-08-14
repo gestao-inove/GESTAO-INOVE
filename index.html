@@ -221,6 +221,42 @@ function abrirWhatsApp(nome, mensagem) {
   }
   window.open(`https://wa.me/${tel}?text=${encodeURIComponent(mensagem || "")}`, "_blank");
 }
+
+// ====== BASE DE CLIENTES (contatos) ======
+// Cache em memória atualizado pelo App; a busca automática lê daqui.
+let CONTATOS_CACHE = [];
+function getContatos() { return CONTATOS_CACHE; }
+function setContatosCache(arr) { CONTATOS_CACHE = Array.isArray(arr) ? arr : []; }
+function soDigitos(v) { return String(v || "").replace(/\D/g, ""); }
+// Remove acentos e deixa minúsculo para comparar nomes sem tropeçar em maiúsculas/acentos
+function normalizarNome(v) {
+  return String(v || "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
+}
+// Formata CPF (000.000.000-00) ou CNPJ (00.000.000/0000-00); se não bater, mostra como está
+function formatarDocumento(v) {
+  const d = soDigitos(v);
+  if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+  if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
+  return v || "";
+}
+// Procura na base um contato que combine com o texto (nome OU documento)
+function buscarContatos(texto) {
+  const q = normalizarNome(texto);
+  const qd = soDigitos(texto);
+  if (q.length < 2 && qd.length < 3) return [];
+  return getContatos().filter((c) => {
+    const nomeOk = q.length >= 2 && normalizarNome(c.nome).includes(q);
+    const docOk = qd.length >= 3 && soDigitos(c.documento).includes(qd);
+    return nomeOk || docOk;
+  }).slice(0, 6);
+}
+// Acha o contato de um cliente já salvo (por documento, senão por nome)
+function acharContato(nome, documento) {
+  const doc = soDigitos(documento);
+  if (doc) { const porDoc = getContatos().find((c) => soDigitos(c.documento) === doc); if (porDoc) return porDoc; }
+  const n = normalizarNome(nome);
+  return n ? getContatos().find((c) => normalizarNome(c.nome) === n) : null;
+}
 function addMonths(mk, n) {
   const [y, m] = mk.split("-").map(Number);
   const d = new Date(y, m - 1 + n, 1);
@@ -360,6 +396,7 @@ function mapAtendimento(row) {
     horarioAgendamento: row.horario_agendamento || "",
     valor: row.valor != null ? parseFloat(row.valor) : null,
     custo: row.custo != null ? parseFloat(row.custo) : null,
+    documento: row.documento || "",
     comissao: row.comissao != null ? parseFloat(row.comissao) : null,
     seguradora: row.seguradora || "",
     pagamento: row.pagamento || "",
@@ -463,6 +500,12 @@ function mapCliente(row) {
     notas: row.notas || "", atendimentoId: row.atendimento_id,
   };
 }
+function mapContato(row) {
+  return {
+    id: row.id, nome: row.nome || "", documento: row.documento || "",
+    telefone: row.telefone || "", email: row.email || "",
+  };
+}
 
 // ====== COMPONENTES BASE ======
 function Stamp({ categoria, subtipo }) {
@@ -514,6 +557,42 @@ function PrimaryButton({ children, onClick }) {
   );
 }
 
+// Campo de cliente com busca automática na base (por nome OU CPF/CNPJ).
+// Ao clicar numa sugestão, onPick recebe o contato para preencher os outros campos.
+// Digitar à mão continua livre — a busca é só um atalho.
+function ClienteAutocomplete({ value, onChange, onPick, placeholder, autoFocus }) {
+  const [aberto, setAberto] = useState(false);
+  const sugestoes = aberto ? buscarContatos(value) : [];
+  return (
+    <div style={{ position: "relative" }}>
+      <input style={inputStyle} value={value} autoFocus={autoFocus}
+             placeholder={placeholder || "Nome do cliente"}
+             onChange={(e) => { onChange(e.target.value); setAberto(true); }}
+             onFocus={() => setAberto(true)}
+             onBlur={() => setTimeout(() => setAberto(false), 160)} />
+      {sugestoes.length > 0 && (
+        <div style={{ position: "absolute", zIndex: 60, left: 0, right: 0, top: "calc(100% + 4px)",
+                      backgroundColor: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 10,
+                      boxShadow: "0 10px 30px rgba(16,27,51,.14)", overflow: "hidden" }}>
+          {sugestoes.map((c) => (
+            <button key={c.id} type="button"
+                    onMouseDown={(e) => { e.preventDefault(); onChange(c.nome); if (onPick) onPick(c); setAberto(false); }}
+                    className="block w-full text-left hover:bg-black/5"
+                    style={{ padding: "9px 12px", borderBottom: `1px solid ${COLORS.line}` }}>
+              <div className="text-sm font-semibold" style={{ color: COLORS.ink }}>{c.nome}</div>
+              {(c.documento || c.telefone) && (
+                <div className="text-[11px]" style={{ color: COLORS.inkSoft }}>
+                  {[formatarDocumento(c.documento), c.telefone].filter(Boolean).join(" · ")}
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Toggle({ ativo, onClick, cor, children }) {
   return (
     <button type="button" onClick={onClick} className="flex-1 py-2.5 rounded-lg text-xs font-medium border"
@@ -551,6 +630,17 @@ function CategoriaSubtipoPicker({ categoria, setCategoria, subtipo, setSubtipo }
 function AtendimentoForm({ item, onSubmit, submitLabel, comissaoInicial, categoriaInicial }) {
   const catInicial = item ? item.categoria : (categoriaInicial || "seguro");
   const [cliente, setCliente] = useState(item ? item.cliente : "");
+  // Dados de identidade do cliente (base de clientes). No editar, tenta puxar da base.
+  const contatoInicial = item ? acharContato(item.cliente, item.documento) : null;
+  const [documento, setDocumento] = useState(item && item.documento ? item.documento : (contatoInicial ? contatoInicial.documento || "" : ""));
+  const [telefone, setTelefoneCli] = useState(contatoInicial ? contatoInicial.telefone || "" : (item ? getTelefone(item.cliente) : ""));
+  const [email, setEmail] = useState(contatoInicial ? contatoInicial.email || "" : "");
+  const preencherContato = (c) => {
+    setCliente(c.nome || "");
+    setDocumento(c.documento || "");
+    setTelefoneCli(c.telefone || "");
+    setEmail(c.email || "");
+  };
   const [categoria, setCategoria] = useState(catInicial);
   const [subtipo, setSubtipo] = useState(item ? item.subtipo : (SUBTIPOS[catInicial] || SUBTIPOS.seguro)[0].key);
   const [horarioSolicitado, setHorarioSolicitado] = useState(item ? item.horarioSolicitado : "");
@@ -585,6 +675,7 @@ function AtendimentoForm({ item, onSubmit, submitLabel, comissaoInicial, categor
     if (!cliente.trim()) return;
     onSubmit({
       cliente: cliente.trim(), categoria, subtipo,
+      documento: documento.trim(), telefone: normalizarTelefone(telefone), email: email.trim(),
       horarioSolicitado, dataSolicitacao, dataAgendamento, horarioAgendamento,
       valor: valor ? parseFloat(valor) : null,
       custo: categoria === "certificado" && custo ? parseFloat(custo) : null,
@@ -603,8 +694,32 @@ function AtendimentoForm({ item, onSubmit, submitLabel, comissaoInicial, categor
   return (
     <React.Fragment>
       <Field label="Cliente">
-        <input style={inputStyle} value={cliente} onChange={(e) => setCliente(e.target.value)} placeholder="Nome do cliente" autoFocus />
+        <ClienteAutocomplete value={cliente} onChange={setCliente} onPick={preencherContato}
+                             placeholder="Nome do cliente" autoFocus />
       </Field>
+      <div className="rounded-lg p-3 mb-3" style={{ backgroundColor: "#F1F3F6" }}>
+        <div className="flex items-center gap-1.5 mb-2">
+          <Users size={14} color={COLORS.burgundy} />
+          <span className="text-xs font-semibold" style={{ color: COLORS.burgundy }}>Dados do cliente</span>
+        </div>
+        <Field label="CPF ou CNPJ">
+          <input style={inputStyle} value={documento} onChange={(e) => setDocumento(e.target.value)}
+                 placeholder="Só números" inputMode="numeric" />
+        </Field>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="WhatsApp (com DDD)">
+            <input style={inputStyle} value={telefone} onChange={(e) => setTelefoneCli(e.target.value)}
+                   placeholder="Ex: 11 91234-5678" inputMode="tel" />
+          </Field>
+          <Field label="E-mail">
+            <input style={inputStyle} value={email} onChange={(e) => setEmail(e.target.value)}
+                   placeholder="cliente@email.com" inputMode="email" />
+          </Field>
+        </div>
+        <p className="text-[11px]" style={{ color: COLORS.inkSoft }}>
+          Comece a digitar o nome ou o CPF/CNPJ no campo Cliente para buscar quem já está na base.
+        </p>
+      </div>
       <CategoriaSubtipoPicker categoria={categoria} setCategoria={setCategoria} subtipo={subtipo} setSubtipo={setSubtipo} />
       <div className="grid grid-cols-2 gap-2">
         <Field label="Data em que o cliente solicitou">
@@ -1028,7 +1143,8 @@ function AddAgendamentoModal({ dateStr, onClose, onSave }) {
   return (
     <Modal title={`Agendar · ${fmtDatePt(dateStr)}`} onClose={onClose}>
       <Field label="Cliente">
-        <input style={inputStyle} value={cliente} onChange={(e) => setCliente(e.target.value)} placeholder="Nome do cliente" autoFocus />
+        <ClienteAutocomplete value={cliente} onChange={setCliente} onPick={(c) => setCliente(c.nome)}
+                             placeholder="Nome do cliente" autoFocus />
       </Field>
       <CategoriaSubtipoPicker categoria={categoria} setCategoria={setCategoria} subtipo={subtipo} setSubtipo={setSubtipo} />
       <Field label="Horário">
@@ -1233,7 +1349,8 @@ function FinanceForm({ item, onSubmit, submitLabel }) {
   return (
     <React.Fragment>
       <Field label="Cliente">
-        <input style={inputStyle} value={cliente} onChange={(e) => setCliente(e.target.value)} placeholder="Nome do cliente" autoFocus />
+        <ClienteAutocomplete value={cliente} onChange={setCliente} onPick={(c) => setCliente(c.nome)}
+                             placeholder="Nome do cliente" autoFocus />
       </Field>
       <CategoriaSubtipoPicker categoria={categoria} setCategoria={setCategoria} subtipo={subtipo} setSubtipo={setSubtipo} />
       <div className="grid grid-cols-2 gap-2">
@@ -3230,11 +3347,15 @@ function App() {
   const [cartoes, setCartoes] = useState([]);
   const [comprasCartao, setComprasCartao] = useState([]);
   const [clientes, setClientes] = useState([]);
+  const [contatos, setContatos] = useState([]);
   const [contas, setContas] = useState([]);
   const [movimentacoes, setMovimentacoes] = useState([]);
   const [pagamentosFatura, setPagamentosFatura] = useState([]);
   const [mesKanban, setMesKanban] = useState(monthKey(todayStr()));
   const [showBackup, setShowBackup] = useState(false);
+
+  // Mantém o cache da base de clientes em dia para a busca automática (ClienteAutocomplete)
+  useEffect(() => { setContatosCache(contatos); }, [contatos]);
 
   // Recupera os certificados que já estavam como "Emitido" antes da correção e ficaram
   // sem cliente na Gestão de Clientes. Roda uma vez só e nunca duplica.
@@ -3262,10 +3383,40 @@ function App() {
     } catch (e) { console.error(e); }
   };
 
+  // Popula a base de clientes uma única vez com os nomes que já existem (atendimentos + clientes)
+  // e o WhatsApp salvo neste navegador. Assim a busca já vem cheia no primeiro uso.
+  const semearContatos = async (ats, cls, conts) => {
+    try { if (localStorage.getItem("contatosSemeados") === "1") return; } catch (e) {}
+    const jaExiste = (nome, doc) => {
+      const d = soDigitos(doc); const n = normalizarNome(nome);
+      return conts.some((c) => (d && soDigitos(c.documento) === d) || (n && normalizarNome(c.nome) === n));
+    };
+    const vistos = {};
+    const novos = [];
+    const registrar = (nome, documento) => {
+      const n = normalizarNome(nome);
+      if (!n || vistos[n] || jaExiste(nome, documento)) return;
+      vistos[n] = true;
+      novos.push({ id: uid(), nome: String(nome).trim(), documento: documento || "",
+                   telefone: getTelefone(nome) || "", email: "" });
+    };
+    ats.forEach((a) => registrar(a.cliente, a.documento));
+    cls.forEach((c) => registrar(c.nome, ""));
+    if (novos.length === 0) {
+      try { localStorage.setItem("contatosSemeados", "1"); } catch (e) {}
+      return;
+    }
+    try {
+      for (const nc of novos) await apiPost("/api/contatos", nc);
+      setContatos((prev) => { const next = [...prev, ...novos]; setContatosCache(next); return next; });
+      localStorage.setItem("contatosSemeados", "1");
+    } catch (e) { console.error(e); }
+  };
+
   const carregarTudo = async () => {
     setLoading(true); setErro("");
     try {
-      const [a, ag, f, d, ct, cc, cl, cn, mv, pf] = await Promise.all([
+      const [a, ag, f, d, ct, cc, cl, cn, mv, pf, cont] = await Promise.all([
         apiGet("/api/atendimentos"), apiGet("/api/agendamentos"), apiGet("/api/financeiro"),
         apiGet("/api/despesas").catch(() => []),
         apiGet("/api/cartoes").catch(() => []),
@@ -3274,9 +3425,13 @@ function App() {
         apiGet("/api/contas").catch(() => []),
         apiGet("/api/movimentacoes").catch(() => []),
         apiGet("/api/pagamentos-fatura").catch(() => []),
+        apiGet("/api/contatos").catch(() => []),
       ]);
       const ats = a.map(mapAtendimento);
       const cls = cl.map(mapCliente);
+      const conts = cont.map(mapContato);
+      setContatos(conts);
+      setContatosCache(conts);
       setAtendimentos(ats);
       setAgendamentos(ag.map(mapAgendamento));
       setFinanceiro(f.map(mapFinanceiro));
@@ -3288,6 +3443,7 @@ function App() {
       setMovimentacoes(mv.map(mapMovimentacao));
       setPagamentosFatura(pf.map(mapPagamentoFatura));
       await sincronizarClientesEmitidos(ats, cls);
+      await semearContatos(ats, cls, conts);
     } catch (e) {
       console.error(e);
       setErro("Não foi possível conectar ao servidor. Ele pode estar 'acordando' — aguarde até 1 minuto e tente de novo.");
@@ -3313,8 +3469,35 @@ function App() {
     return () => clearInterval(iv);
   }, [logado]);
 
+  const upsertContato = async (dados) => {
+    const nome = (dados.nome || "").trim();
+    if (!nome) return;
+    const documento = (dados.documento || "").trim();
+    const telefone = dados.telefone || "";
+    const email = (dados.email || "").trim();
+    if (telefone) setTelefone(nome, telefone); // mantém o botão de WhatsApp funcionando
+    const existente = acharContato(nome, documento);
+    if (existente) {
+      const atualizado = {
+        ...existente, nome,
+        documento: documento || existente.documento || "",
+        telefone: telefone || existente.telefone || "",
+        email: email || existente.email || "",
+      };
+      if (atualizado.nome === existente.nome && atualizado.documento === existente.documento
+          && atualizado.telefone === existente.telefone && atualizado.email === existente.email) return;
+      setContatos((prev) => { const next = prev.map((c) => (c.id === existente.id ? atualizado : c)); setContatosCache(next); return next; });
+      try { await apiPatch(`/api/contatos/${existente.id}`, atualizado); } catch (e) { console.error(e); }
+    } else {
+      const novo = { id: uid(), nome, documento, telefone, email };
+      setContatos((prev) => { const next = [...prev, novo]; setContatosCache(next); return next; });
+      try { await apiPost("/api/contatos", novo); } catch (e) { console.error(e); }
+    }
+  };
+
   const addAtendimento = async (item) => {
     setAtendimentos((prev) => [item, ...prev]);
+    upsertContato({ nome: item.cliente, documento: item.documento, telefone: item.telefone, email: item.email });
     try {
       await apiPost("/api/atendimentos", item);
       if (item.dataAgendamento && item.horarioAgendamento) {
@@ -3341,6 +3524,7 @@ function App() {
   };
   const editAtendimento = async (item) => {
     setAtendimentos((prev) => prev.map((a) => (a.id === item.id ? item : a)));
+    upsertContato({ nome: item.cliente, documento: item.documento, telefone: item.telefone, email: item.email });
     try {
       await apiPatch(`/api/atendimentos/${item.id}`, item);
 
