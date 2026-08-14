@@ -359,6 +359,7 @@ function mapAtendimento(row) {
     dataAgendamento: row.data_agendamento ? String(row.data_agendamento).slice(0, 10) : "",
     horarioAgendamento: row.horario_agendamento || "",
     valor: row.valor != null ? parseFloat(row.valor) : null,
+    custo: row.custo != null ? parseFloat(row.custo) : null,
     comissao: row.comissao != null ? parseFloat(row.comissao) : null,
     seguradora: row.seguradora || "",
     pagamento: row.pagamento || "",
@@ -559,6 +560,7 @@ function AtendimentoForm({ item, onSubmit, submitLabel, comissaoInicial, categor
   const [dataAgendamento, setDataAgendamento] = useState(item ? item.dataAgendamento : "");
   const [horarioAgendamento, setHorarioAgendamento] = useState(item ? item.horarioAgendamento : "");
   const [valor, setValor] = useState(item && item.valor != null ? String(item.valor) : "");
+  const [custo, setCusto] = useState(item && item.custo != null ? String(item.custo) : "");
   const [comissao, setComissao] = useState(
     item && item.comissao != null ? String(item.comissao) : (comissaoInicial != null ? String(comissaoInicial) : "")
   );
@@ -585,6 +587,7 @@ function AtendimentoForm({ item, onSubmit, submitLabel, comissaoInicial, categor
       cliente: cliente.trim(), categoria, subtipo,
       horarioSolicitado, dataSolicitacao, dataAgendamento, horarioAgendamento,
       valor: valor ? parseFloat(valor) : null,
+      custo: categoria === "certificado" && custo ? parseFloat(custo) : null,
       comissao: categoria === "seguro" && comissao ? comissaoNum : null,
       valorComissao: categoria === "seguro" ? valorComissao : null,
       parcelasComissao: categoria === "seguro" ? nParcelas : null,
@@ -713,6 +716,13 @@ function AtendimentoForm({ item, onSubmit, submitLabel, comissaoInicial, categor
           <Field label="Valor (R$)">
             <input type="number" step="0.01" inputMode="decimal" style={inputStyle} value={valor}
                    onChange={(e) => setValor(e.target.value)} placeholder="0,00" />
+          </Field>
+          <Field label="Custo (R$)">
+            <input type="number" step="0.01" inputMode="decimal" style={inputStyle} value={custo}
+                   onChange={(e) => setCusto(e.target.value)} placeholder="0,00" />
+            <p className="text-[11px] mt-1" style={{ color: COLORS.inkSoft }}>
+              Quanto você paga pela emissão. Sai automaticamente da conta do negócio quando o valor for recebido.
+            </p>
           </Field>
           {valor && (
             <React.Fragment>
@@ -3321,7 +3331,7 @@ function App() {
         for (const l of lancs) await apiPost("/api/financeiro", l);
       } else if (item.categoria === "certificado" && (item.valor || 0) > 0 && !aindaSolicitado) {
         const lanc = { id: uid(), cliente: item.cliente, categoria: item.categoria, subtipo: item.subtipo,
-                       valorPago: item.valor, custo: 0, forma: item.forma || "",
+                       valorPago: item.valor, custo: item.custo || 0, forma: item.forma || "",
                        data: item.dataAgendamento || todayStr(), pago: item.pagamento !== "pendente",
                        atendimentoId: item.id };
         setFinanceiro((prev) => [lanc, ...prev]);
@@ -3362,7 +3372,7 @@ function App() {
       } else if (item.categoria === "certificado" && (item.valor || 0) > 0) {
         const existenteF = financeiro.find((f) => f.atendimentoId === item.id);
         const dadosF = { cliente: item.cliente, categoria: item.categoria, subtipo: item.subtipo,
-                         valorPago: item.valor, forma: item.forma || "",
+                         valorPago: item.valor, custo: item.custo || 0, forma: item.forma || "",
                          data: item.dataAgendamento || (existenteF ? existenteF.data : todayStr()),
                          pago: item.pagamento !== "pendente" };
         const soSolicitado = item.status === "solicitado";
@@ -3370,7 +3380,7 @@ function App() {
           setFinanceiro((prev) => prev.map((f) => (f.id === existenteF.id ? { ...f, ...dadosF } : f)));
           await apiPatch(`/api/financeiro/${existenteF.id}`, dadosF);
         } else if (!soSolicitado) {
-          const novoF = { id: uid(), ...dadosF, custo: 0, atendimentoId: item.id };
+          const novoF = { id: uid(), ...dadosF, atendimentoId: item.id };
           setFinanceiro((prev) => [novoF, ...prev]);
           await apiPost("/api/financeiro", novoF);
         }
@@ -3395,7 +3405,7 @@ function App() {
         } else if (!lanc && item.valor > 0) {
           const novoLanc = {
             id: uid(), cliente: item.cliente, categoria: item.categoria, subtipo: item.subtipo,
-            valorPago: item.valor, custo: 0, forma: item.forma || "",
+            valorPago: item.valor, custo: item.custo || 0, forma: item.forma || "",
             data: item.dataAgendamento || todayStr(), pago: item.pagamento !== "pendente",
             atendimentoId: id,
           };
