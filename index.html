@@ -88,6 +88,7 @@ const Filter = (p) => <Svg {...p}><polygon points="22 3 2 3 10 12.46 10 19 14 21
 const LogOut = (p) => <Svg {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></Svg>;
 const MessageCircle = (p) => <Svg {...p}><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></Svg>;
 const Download = (p) => <Svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></Svg>;
+const Upload = (p) => <Svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></Svg>;
 const Star = (p) => <Svg {...p}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></Svg>;
 
 // ====== DADOS FIXOS ======
@@ -3155,18 +3156,48 @@ function ProximosVencimentos({ clientes }) {
 }
 
 // ====== BACKUP DOS DADOS ======
-function BackupModal({ dados, onClose }) {
+function BackupModal({ dados, onRestaurar, onClose }) {
   const { atendimentos, agendamentos, financeiro, despesas, cartoes, comprasCartao, clientes,
-          contas = [], movimentacoes = [] } = dados;
+          contas = [], movimentacoes = [], contatos = [], pagamentosFatura = [] } = dados;
+  const [restaurando, setRestaurando] = useState(false);
+  const [progresso, setProgresso] = useState({ feitos: 0, total: 0 });
+  const fileRef = React.useRef(null);
 
   const baixarJSON = () => {
     const pacote = {
       geradoEm: new Date().toISOString(),
       atendimentos, agendamentos, financeiro, despesas, cartoes, comprasCartao, clientes,
-      contas, movimentacoes,
+      contas, movimentacoes, contatos, pagamentosFatura,
       telefonesWhatsApp: getTelefones(),
     };
     baixarArquivo(`backup-inove-${carimboData()}.json`, JSON.stringify(pacote, null, 2), "application/json");
+  };
+
+  const escolherArquivo = () => { if (fileRef.current) fileRef.current.click(); };
+  const aoSelecionarArquivo = (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ""; // permite reescolher o mesmo arquivo depois
+    if (!file || !onRestaurar) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      let pacote;
+      try { pacote = JSON.parse(reader.result); }
+      catch (err) { alert("Arquivo inválido — não parece ser um backup do Inove."); return; }
+      if (!pacote || typeof pacote !== "object" || !Array.isArray(pacote.atendimentos)) {
+        alert("Arquivo inválido — não parece ser um backup do Inove."); return;
+      }
+      const qtd = ["atendimentos","agendamentos","financeiro","despesas","cartoes","comprasCartao",
+                   "clientes","contas","movimentacoes","contatos","pagamentosFatura"]
+                   .reduce((s, k) => s + ((pacote[k] || []).length), 0);
+      if (!window.confirm(`Restaurar este backup? Vai gravar ${qtd} registro(s) no banco de dados atual.\n\nUse isto num banco VAZIO (ex: migração). Registros com o mesmo código serão ignorados.`)) return;
+      setRestaurando(true); setProgresso({ feitos: 0, total: qtd });
+      try {
+        const r = await onRestaurar(pacote, (feitos, total) => setProgresso({ feitos, total }));
+        alert(`Pronto! ${r.total - r.erros} de ${r.total} registro(s) restaurados` + (r.erros ? ` (${r.erros} já existiam ou falharam).` : "."));
+      } catch (err) { console.error(err); alert("Houve um erro na restauração. Veja o console (F12) para detalhes."); }
+      finally { setRestaurando(false); }
+    };
+    reader.readAsText(file);
   };
 
   const csvClientes = () => baixarArquivo(`clientes-${carimboData()}.csv`, paraCSV(clientes, [
@@ -3252,6 +3283,29 @@ function BackupModal({ dados, onClose }) {
           <Download size={15} color="#fff" /> Baixar backup completo
         </button>
       </div>
+
+      {onRestaurar && (
+        <div className="rounded-lg p-3 mb-3" style={{ backgroundColor: "#F1F3F6" }}>
+          <p className="text-xs mb-2" style={{ color: COLORS.ink }}>
+            <strong>Restaurar backup.</strong> Envia um arquivo de backup para o banco de dados atual.
+            Use ao trocar de banco (migração) ou para recuperar seus dados.
+          </p>
+          <input ref={fileRef} type="file" accept="application/json,.json" onChange={aoSelecionarArquivo} style={{ display: "none" }} />
+          <button onClick={escolherArquivo} disabled={restaurando}
+                  className="w-full py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2"
+                  style={{ backgroundColor: restaurando ? "#F1F3F6" : COLORS.panel,
+                           color: restaurando ? COLORS.inkSoft : COLORS.burgundy,
+                           border: `1px solid ${restaurando ? COLORS.line : COLORS.burgundy}` }}>
+            <Upload size={15} color={restaurando ? COLORS.inkSoft : COLORS.burgundy} />
+            {restaurando ? `Restaurando… ${progresso.feitos}/${progresso.total}` : "Restaurar de um arquivo"}
+          </button>
+          {restaurando && (
+            <p className="text-[11px] mt-2" style={{ color: COLORS.inkSoft }}>
+              Não feche esta janela até terminar.
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="text-xs font-semibold mb-2" style={{ color: COLORS.inkSoft }}>Planilhas para abrir no Excel</div>
       <div className="space-y-1.5">
@@ -3448,6 +3502,39 @@ function App() {
       console.error(e);
       setErro("Não foi possível conectar ao servidor. Ele pode estar 'acordando' — aguarde até 1 minuto e tente de novo.");
     } finally { setLoading(false); }
+  };
+
+  // Restaura um backup completo (JSON) gravando cada registro no banco atual.
+  // Usado na migração de banco e como restauração de segurança. onProgresso(feitos, total, tabela).
+  const restaurarBackup = async (pacote, onProgresso) => {
+    const grupos = [
+      ["/api/contatos", pacote.contatos],
+      ["/api/clientes", pacote.clientes],
+      ["/api/atendimentos", pacote.atendimentos],
+      ["/api/agendamentos", pacote.agendamentos],
+      ["/api/financeiro", pacote.financeiro],
+      ["/api/despesas", pacote.despesas],
+      ["/api/cartoes", pacote.cartoes],
+      ["/api/compras-cartao", pacote.comprasCartao],
+      ["/api/contas", pacote.contas],
+      ["/api/movimentacoes", pacote.movimentacoes],
+      ["/api/pagamentos-fatura", pacote.pagamentosFatura],
+    ];
+    const total = grupos.reduce((s, [, arr]) => s + ((arr || []).length), 0);
+    let feitos = 0, erros = 0;
+    for (const [url, arr] of grupos) {
+      for (const rec of (arr || [])) {
+        try { await apiPost(url, rec); }
+        catch (e) { erros++; console.error("Falha ao restaurar em " + url, e); }
+        feitos++;
+        if (onProgresso) onProgresso(feitos, total);
+      }
+    }
+    if (pacote.telefonesWhatsApp) {
+      try { localStorage.setItem("wa_telefones", JSON.stringify(pacote.telefonesWhatsApp)); } catch (e) {}
+    }
+    await carregarTudo();
+    return { total, erros };
   };
 
   useEffect(() => {
@@ -3870,7 +3957,8 @@ function App() {
 
       {showBackup && (
         <BackupModal
-          dados={{ atendimentos, agendamentos, financeiro, despesas, cartoes, comprasCartao, clientes, contas, movimentacoes }}
+          dados={{ atendimentos, agendamentos, financeiro, despesas, cartoes, comprasCartao, clientes, contas, movimentacoes, contatos, pagamentosFatura }}
+          onRestaurar={restaurarBackup}
           onClose={() => setShowBackup(false)}
         />
       )}
