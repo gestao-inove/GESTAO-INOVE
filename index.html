@@ -1506,6 +1506,8 @@ function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
   const [fSituacao, setFSituacao] = useState("todas");
   const [fValorMin, setFValorMin] = useState("");
   const [fValorMax, setFValorMax] = useState("");
+  const [recebimentosAberto, setRecebimentosAberto] = useState(true);
+  const [gastosAberto, setGastosAberto] = useState(true);
 
   // Regime de caixa: o recebido conta no mês da baixa (data do lançamento já pago).
   // O pendente aparece no mês da DATA PREVISTA DE RECEBIMENTO (campo "data" do lançamento).
@@ -1615,6 +1617,7 @@ function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
                 style={{ backgroundColor: filtrosAtivos ? COLORS.burgundy + "12" : "#F1F3F6", color: filtrosAtivos ? COLORS.burgundy : COLORS.inkSoft }}>
           <Filter size={13} color={filtrosAtivos ? COLORS.burgundy : COLORS.inkSoft} />
           {filtrosAtivos ? "Busca ativa · todos os meses" : "Filtrar / buscar"}
+          {mostrarFiltros ? <ChevronDown size={14} color={filtrosAtivos ? COLORS.burgundy : COLORS.inkSoft} /> : <ChevronRight size={14} color={filtrosAtivos ? COLORS.burgundy : COLORS.inkSoft} />}
         </button>
         {mostrarFiltros && (
           <div className="mt-2 rounded-lg p-3" style={{ backgroundColor: "#F1F3F6" }}>
@@ -1663,18 +1666,23 @@ function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
         </button>
       )}
 
-      <div className="flex items-center gap-1.5 mb-2 mt-1">
+      <button onClick={() => setRecebimentosAberto((v) => !v)}
+              className="w-full flex items-center gap-1.5 mb-2 mt-1" title={recebimentosAberto ? "Recolher" : "Expandir"}>
         <TrendingUp size={15} color={COLORS.green} />
-        <h3 className="text-sm font-semibold" style={{ color: COLORS.ink }}>
+        <h3 className="text-sm font-semibold text-left" style={{ color: COLORS.ink }}>
           {filtrosAtivos ? `Resultados da busca · ${visiveis.length} encontrado(s)` : `Recebimentos · ${monthLabelShort(refMes)}`}
         </h3>
-      </div>
-      {visiveis.length === 0 && (
+        <span className="ml-auto flex items-center gap-1 text-[11px]" style={{ color: COLORS.inkSoft }}>
+          {!recebimentosAberto && !filtrosAtivos && `${visiveis.length} lançamento(s)`}
+          {recebimentosAberto ? <ChevronDown size={16} color={COLORS.inkSoft} /> : <ChevronRight size={16} color={COLORS.inkSoft} />}
+        </span>
+      </button>
+      {recebimentosAberto && visiveis.length === 0 && (
         <p className="text-sm py-6 text-center rounded-lg" style={{ color: COLORS.inkSoft, backgroundColor: "#F1F3F6" }}>
           {filtrosAtivos ? "Nenhum lançamento encontrado com esses filtros." : `Nenhum lançamento em ${monthLabelShort(refMes)}`}
         </p>
       )}
-      {visiveis.length > 0 && (
+      {recebimentosAberto && visiveis.length > 0 && (
         <div className="rounded-lg overflow-hidden" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 620 }}>
@@ -1766,18 +1774,21 @@ function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
       )}
 
       <div className="flex items-center justify-between mt-5 mb-3">
-        <div className="flex items-center gap-1.5">
+        <button onClick={() => setGastosAberto((v) => !v)} className="flex items-center gap-1.5" title={gastosAberto ? "Recolher" : "Expandir"}>
           <Receipt size={15} color={COLORS.slate} />
-          <h3 className="text-sm font-semibold" style={{ color: COLORS.ink }}>Gastos da empresa · {monthLabelShort(refMes)}</h3>
-        </div>
+          <h3 className="text-sm font-semibold text-left" style={{ color: COLORS.ink }}>Gastos da empresa · {monthLabelShort(refMes)}</h3>
+          {!gastosAberto && <span className="text-[11px]" style={{ color: COLORS.inkSoft }}>({gastosDoMes.length})</span>}
+          {gastosAberto ? <ChevronDown size={16} color={COLORS.inkSoft} /> : <ChevronRight size={16} color={COLORS.inkSoft} />}
+        </button>
         <button onClick={() => setShowAddGasto(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
                 style={{ backgroundColor: COLORS.slate + "1A", color: COLORS.slate }}>
           <Plus size={13} color={COLORS.slate} /> Gasto
         </button>
       </div>
-      {gastosDoMes.length === 0 && (
+      {gastosAberto && gastosDoMes.length === 0 && (
         <p className="text-sm py-6 text-center rounded-lg" style={{ color: COLORS.inkSoft, backgroundColor: "#F1F3F6" }}>Nenhum gasto da empresa em {monthLabelShort(refMes)}</p>
       )}
+      {gastosAberto && (
       <div className="space-y-2">
         {gastosDoMes.map((d) => (
           <div key={d.id} className="rounded-lg p-3 flex items-center gap-3" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
@@ -1804,6 +1815,7 @@ function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
           </div>
         ))}
       </div>
+      )}
 
       <div className="mt-6 pt-5" style={{ borderTop: `1px solid ${COLORS.line}` }}>
         <ContasView contas={contasPJ} movimentacoes={movimentacoes || []}
