@@ -453,6 +453,7 @@ function mapDespesa(row) {
     valor: parseFloat(row.valor) || 0,
     data: row.data ? String(row.data).slice(0, 10) : "",
     notas: row.notas || "", forma: row.forma || "",
+    pago: row.pago === true,
   };
 }
 function mapCartao(row) {
@@ -1708,7 +1709,12 @@ function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
               {d.tipo === "negocio_fixa" ? <Repeat size={16} color={COLORS.slate} /> : <Receipt size={16} color={COLORS.slate} />}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold truncate" style={{ color: COLORS.ink }}>{d.titulo}</div>
+              <div className="text-sm font-semibold truncate flex items-center gap-1.5" style={{ color: COLORS.ink }}>
+                {d.titulo}
+                {d.pago
+                  ? <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold" style={{ backgroundColor: COLORS.green + "1A", color: COLORS.green }}>PAGO</span>
+                  : ((d.data || "") > todayStr() && <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold" style={{ backgroundColor: COLORS.camel + "26", color: COLORS.camelDeep }}>AGENDADO</span>)}
+              </div>
               <div className="text-xs" style={{ color: COLORS.inkSoft }}>{d.tipo === "negocio_fixa" ? "Conta fixa" : "Gasto avulso"} · {fmtDatePt(d.data)}{d.forma ? ` · ${d.forma}` : ""}</div>
               {d.notas && <p className="text-xs mt-0.5" style={{ color: COLORS.inkSoft }}>{d.notas}</p>}
             </div>
@@ -1746,10 +1752,11 @@ function DespesaForm({ item, tipoInicial, onSubmit, submitLabel }) {
   const [data, setData] = useState(item ? item.data : todayStr());
   const [forma, setForma] = useState(item && item.forma ? item.forma : FORMAS_DESPESA[0]);
   const [notas, setNotas] = useState(item ? item.notas : "");
+  const [pago, setPago] = useState(item ? !!item.pago : false);
 
   const submit = () => {
     if (!titulo.trim() || !valor) return;
-    onSubmit({ titulo: titulo.trim(), tipo, valor: parseFloat(valor) || 0, data, forma, notas: notas.trim() });
+    onSubmit({ titulo: titulo.trim(), tipo, valor: parseFloat(valor) || 0, data, forma, notas: notas.trim(), pago });
   };
 
   return (
@@ -1774,6 +1781,17 @@ function DespesaForm({ item, tipoInicial, onSubmit, submitLabel }) {
           <input type="date" style={inputStyle} value={data} onChange={(e) => setData(e.target.value)} />
         </Field>
       </div>
+      <Field label="Situação">
+        <div className="flex gap-2">
+          <Toggle ativo={pago} cor={COLORS.green} onClick={() => setPago(true)}>Pago</Toggle>
+          <Toggle ativo={!pago} cor={COLORS.camelDeep} onClick={() => setPago(false)}>Pendente</Toggle>
+        </div>
+        <p className="text-[11px] mt-1" style={{ color: COLORS.inkSoft }}>
+          {pago
+            ? "Pago: já sai da conta agora, mesmo antes da data."
+            : "Pendente: sai da conta automaticamente quando a data chegar."}
+        </p>
+      </Field>
       <Field label="Como foi paga">
         <select style={inputStyle} value={forma} onChange={(e) => setForma(e.target.value)}>
           {FORMAS_DESPESA.map((f) => <option key={f} value={f}>{f}</option>)}
@@ -2397,19 +2415,19 @@ function fluxoNegocioConta(financeiro, despesas) {
   const mesAtual = monthKey(hoje);
   (despesas || []).forEach((d) => {
     if (d.tipo === "negocio_avulso") {
-      // Só abate do saldo quando a data do gasto já chegou (não debita um gasto futuro)
-      if ((d.data || "") <= hoje) {
+      // Abate quando a data já chegou OU quando você marcou como Pago (pagou antes)
+      if (d.pago || (d.data || "") <= hoje) {
         movs.push({ id: "auto-gasto-" + d.id, auto: true, tipo: "saida", valor: d.valor || 0,
                     descricao: "Gasto · " + d.titulo, data: d.data });
       }
     } else if (d.tipo === "negocio_fixa") {
-      // Conta fixa recorre todo mês, do início até o mês atual — mas só abate as datas que já passaram
+      // Conta fixa recorre todo mês. Abate as datas que já passaram; se marcada Pago, abate também a do mês atual antes da data.
       const dia = (d.data || "").slice(8, 10) || "01";
       let mk = monthKey(d.data);
       let guard = 0;
       while (mk <= mesAtual && guard < 240) {
         const dataOcorrencia = mk + "-" + dia;
-        if (dataOcorrencia <= hoje) {
+        if (dataOcorrencia <= hoje || (d.pago && mk === mesAtual)) {
           movs.push({ id: "auto-fix-" + d.id + "-" + mk, auto: true, tipo: "saida", valor: d.valor || 0,
                       descricao: "Conta fixa · " + d.titulo, data: dataOcorrencia });
         }
