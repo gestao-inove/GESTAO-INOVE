@@ -1499,6 +1499,13 @@ function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
   const [editingGasto, setEditingGasto] = useState(null);
   const [filtro, setFiltro] = useState(null);
   const [refMes, setRefMes] = useState(monthKey(todayStr()));
+  // Busca avançada (procura em todos os meses quando algum filtro está preenchido)
+  const [mostrarFiltros, setMostrarFiltros] = useState(false);
+  const [buscaCliente, setBuscaCliente] = useState("");
+  const [fCategoria, setFCategoria] = useState("todas");
+  const [fSituacao, setFSituacao] = useState("todas");
+  const [fValorMin, setFValorMin] = useState("");
+  const [fValorMax, setFValorMax] = useState("");
 
   // Regime de caixa: o recebido conta no mês da baixa (data do lançamento já pago).
   // O pendente aparece no mês da DATA PREVISTA DE RECEBIMENTO (campo "data" do lançamento).
@@ -1533,10 +1540,29 @@ function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
   const fluxoNegocio = fluxoNegocioConta(financeiro, despesas);
   const totalContasPJ = contasPJ.reduce((s, c) => s + saldoDaConta(c, movimentacoes || [], fluxoNegocio), 0);
 
-  let visiveis = sorted;
-  if (filtro === "pago") visiveis = sorted.filter((f) => f.pago);
-  else if (filtro === "pendente") visiveis = sorted.filter((f) => !f.pago);
-  else if (filtro === "custo") visiveis = sorted.filter((f) => (f.custo || 0) > 0);
+  const filtrosAtivos = !!(buscaCliente.trim() || fCategoria !== "todas" || fSituacao !== "todas" || fValorMin || fValorMax);
+  const limparBusca = () => { setBuscaCliente(""); setFCategoria("todas"); setFSituacao("todas"); setFValorMin(""); setFValorMax(""); };
+  let visiveis;
+  if (filtrosAtivos) {
+    // Com filtro ativo, procura em TODOS os meses (não só no mês selecionado)
+    const min = parseFloat(fValorMin); const max = parseFloat(fValorMax);
+    const q = normalizarNome(buscaCliente);
+    visiveis = [...financeiro].filter((f) => {
+      if (fCategoria !== "todas" && f.categoria !== fCategoria) return false;
+      if (fSituacao === "pago" && !f.pago) return false;
+      if (fSituacao === "pendente" && f.pago) return false;
+      if (q && !normalizarNome(f.cliente).includes(q)) return false;
+      const v = f.valorPago || 0;
+      if (!isNaN(min) && v < min) return false;
+      if (!isNaN(max) && v > max) return false;
+      return true;
+    }).sort((a, b) => (b.data || "").localeCompare(a.data || ""));
+  } else {
+    visiveis = sorted;
+    if (filtro === "pago") visiveis = sorted.filter((f) => f.pago);
+    else if (filtro === "pendente") visiveis = sorted.filter((f) => !f.pago);
+    else if (filtro === "custo") visiveis = sorted.filter((f) => (f.custo || 0) > 0);
+  }
   const labelFiltro = { pago: "Recebido", pendente: "A receber", custo: "Custo" }[filtro];
 
   return (
@@ -1584,7 +1610,53 @@ function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
               onClick={() => setFiltro(null)} />
       </div>
 
-      {filtro && (
+      <div className="mb-3">
+        <button onClick={() => setMostrarFiltros((v) => !v)} className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg"
+                style={{ backgroundColor: filtrosAtivos ? COLORS.burgundy + "12" : "#F1F3F6", color: filtrosAtivos ? COLORS.burgundy : COLORS.inkSoft }}>
+          <Filter size={13} color={filtrosAtivos ? COLORS.burgundy : COLORS.inkSoft} />
+          {filtrosAtivos ? "Busca ativa · todos os meses" : "Filtrar / buscar"}
+        </button>
+        {mostrarFiltros && (
+          <div className="mt-2 rounded-lg p-3" style={{ backgroundColor: "#F1F3F6" }}>
+            <Field label="Cliente">
+              <input style={inputStyle} value={buscaCliente} onChange={(e) => setBuscaCliente(e.target.value)} placeholder="Nome do cliente" />
+            </Field>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Categoria">
+                <select style={inputStyle} value={fCategoria} onChange={(e) => setFCategoria(e.target.value)}>
+                  <option value="todas">Todas</option>
+                  <option value="seguro">Seguro</option>
+                  <option value="certificado">Certificado</option>
+                  <option value="outros">Outros</option>
+                </select>
+              </Field>
+              <Field label="Situação">
+                <select style={inputStyle} value={fSituacao} onChange={(e) => setFSituacao(e.target.value)}>
+                  <option value="todas">Todas</option>
+                  <option value="pago">Recebido</option>
+                  <option value="pendente">A receber</option>
+                </select>
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Valor de (R$)">
+                <input type="number" step="0.01" inputMode="decimal" style={inputStyle} value={fValorMin} onChange={(e) => setFValorMin(e.target.value)} placeholder="0,00" />
+              </Field>
+              <Field label="Valor até (R$)">
+                <input type="number" step="0.01" inputMode="decimal" style={inputStyle} value={fValorMax} onChange={(e) => setFValorMax(e.target.value)} placeholder="0,00" />
+              </Field>
+            </div>
+            {filtrosAtivos && (
+              <button onClick={limparBusca} className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg"
+                      style={{ backgroundColor: COLORS.panel, color: COLORS.inkSoft, border: `1px solid ${COLORS.line}` }}>
+                <X size={12} color={COLORS.inkSoft} /> Limpar busca
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {filtro && !filtrosAtivos && (
         <button onClick={() => setFiltro(null)} className="mb-3 flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg"
                 style={{ backgroundColor: "#F1F3F6", color: COLORS.inkSoft }}>
           <X size={12} color={COLORS.inkSoft} /> Mostrando: {labelFiltro} — toque para limpar
@@ -1593,10 +1665,14 @@ function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
 
       <div className="flex items-center gap-1.5 mb-2 mt-1">
         <TrendingUp size={15} color={COLORS.green} />
-        <h3 className="text-sm font-semibold" style={{ color: COLORS.ink }}>Recebimentos · {monthLabelShort(refMes)}</h3>
+        <h3 className="text-sm font-semibold" style={{ color: COLORS.ink }}>
+          {filtrosAtivos ? `Resultados da busca · ${visiveis.length} encontrado(s)` : `Recebimentos · ${monthLabelShort(refMes)}`}
+        </h3>
       </div>
       {visiveis.length === 0 && (
-        <p className="text-sm py-6 text-center rounded-lg" style={{ color: COLORS.inkSoft, backgroundColor: "#F1F3F6" }}>Nenhum lançamento em {monthLabelShort(refMes)}</p>
+        <p className="text-sm py-6 text-center rounded-lg" style={{ color: COLORS.inkSoft, backgroundColor: "#F1F3F6" }}>
+          {filtrosAtivos ? "Nenhum lançamento encontrado com esses filtros." : `Nenhum lançamento em ${monthLabelShort(refMes)}`}
+        </p>
       )}
       {visiveis.length > 0 && (
         <div className="rounded-lg overflow-hidden" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
