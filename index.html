@@ -1995,10 +1995,10 @@ function PagarFaturaModal({ cartao, mes, valorFatura, contas, onClose, onConfirm
   );
 }
 
-function CompraForm({ item, cartaoId, onSubmit, submitLabel }) {
+function CompraForm({ item, cartaoId, dataInicial, onSubmit, submitLabel }) {
   const [descricao, setDescricao] = useState(item ? item.descricao : "");
   const [valorParcela, setValorParcela] = useState(item ? String(item.valorParcela) : "");
-  const [dataCompra, setDataCompra] = useState(item ? item.dataCompra : todayStr());
+  const [dataCompra, setDataCompra] = useState(item ? item.dataCompra : (dataInicial || todayStr()));
   const [parcelas, setParcelas] = useState(item ? String(item.parcelas) : "1");
   const [notas, setNotas] = useState(item ? item.notas : "");
 
@@ -2047,10 +2047,10 @@ function CompraForm({ item, cartaoId, onSubmit, submitLabel }) {
   );
 }
 
-function AddCompraModal({ cartaoId, onClose, onSave }) {
+function AddCompraModal({ cartaoId, dataInicial, onClose, onSave }) {
   return (
     <Modal title="Nova compra" onClose={onClose}>
-      <CompraForm cartaoId={cartaoId} submitLabel="Salvar compra" onSubmit={(data) => { onSave({ id: uid(), ...data }); onClose(); }} />
+      <CompraForm cartaoId={cartaoId} dataInicial={dataInicial} submitLabel="Salvar compra" onSubmit={(data) => { onSave({ id: uid(), ...data }); onClose(); }} />
     </Modal>
   );
 }
@@ -2186,12 +2186,12 @@ function CartoesView({ cartoes, compras, onAddCartao, onDeleteCartao, onAddCompr
           </div>
         </div>
 
-        <div className="text-xs font-semibold mb-2" style={{ color: COLORS.inkSoft }}>Compras lançadas</div>
-        {comprasCartao.length === 0 && (
-          <p className="text-sm py-6 text-center rounded-lg" style={{ color: COLORS.inkSoft, backgroundColor: "#F1F3F6" }}>Nenhuma compra neste cartão</p>
+        <div className="text-xs font-semibold mb-2 capitalize" style={{ color: COLORS.inkSoft }}>Compras de {monthLabelShort(refMes)}</div>
+        {comprasCartao.filter((c) => parcelaInfo(c, refMes)).length === 0 && (
+          <p className="text-sm py-6 text-center rounded-lg" style={{ color: COLORS.inkSoft, backgroundColor: "#F1F3F6" }}>Nenhuma compra em {monthLabelShort(refMes)}</p>
         )}
         <div className="space-y-2">
-          {comprasCartao.map((c) => {
+          {comprasCartao.filter((c) => parcelaInfo(c, refMes)).map((c) => {
             const p = parcelaInfo(c, refMes);
             return (
               <div key={c.id} className="rounded-lg p-3" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
@@ -2230,7 +2230,7 @@ function CartoesView({ cartoes, compras, onAddCartao, onDeleteCartao, onAddCompr
           })}
         </div>
 
-        {showAddCompra && <AddCompraModal cartaoId={cartao.id} onClose={() => setShowAddCompra(false)} onSave={onAddCompra} />}
+        {showAddCompra && <AddCompraModal cartaoId={cartao.id} dataInicial={refMes === monthKey(todayStr()) ? todayStr() : refMes + "-01"} onClose={() => setShowAddCompra(false)} onSave={onAddCompra} />}
         {showEstorno && <EstornoModal cartaoId={cartao.id} onClose={() => setShowEstorno(false)} onSave={onAddCompra} />}
         {editingCompra && <EditCompraModal item={editingCompra} onClose={() => setEditingCompra(null)} onSave={onEditCompra} />}
       </div>
