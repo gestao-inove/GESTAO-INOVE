@@ -2393,19 +2393,26 @@ function fluxoNegocioConta(financeiro, despesas) {
                   descricao: "Custo · " + f.cliente, data: f.data });
     }
   });
-  const mesAtual = monthKey(todayStr());
+  const hoje = todayStr();
+  const mesAtual = monthKey(hoje);
   (despesas || []).forEach((d) => {
     if (d.tipo === "negocio_avulso") {
-      movs.push({ id: "auto-gasto-" + d.id, auto: true, tipo: "saida", valor: d.valor || 0,
-                  descricao: "Gasto · " + d.titulo, data: d.data });
+      // Só abate do saldo quando a data do gasto já chegou (não debita um gasto futuro)
+      if ((d.data || "") <= hoje) {
+        movs.push({ id: "auto-gasto-" + d.id, auto: true, tipo: "saida", valor: d.valor || 0,
+                    descricao: "Gasto · " + d.titulo, data: d.data });
+      }
     } else if (d.tipo === "negocio_fixa") {
-      // Conta fixa recorre todo mês, do início até o mês atual
+      // Conta fixa recorre todo mês, do início até o mês atual — mas só abate as datas que já passaram
       const dia = (d.data || "").slice(8, 10) || "01";
       let mk = monthKey(d.data);
       let guard = 0;
       while (mk <= mesAtual && guard < 240) {
-        movs.push({ id: "auto-fix-" + d.id + "-" + mk, auto: true, tipo: "saida", valor: d.valor || 0,
-                    descricao: "Conta fixa · " + d.titulo, data: mk + "-" + dia });
+        const dataOcorrencia = mk + "-" + dia;
+        if (dataOcorrencia <= hoje) {
+          movs.push({ id: "auto-fix-" + d.id + "-" + mk, auto: true, tipo: "saida", valor: d.valor || 0,
+                      descricao: "Conta fixa · " + d.titulo, data: dataOcorrencia });
+        }
         mk = addMonths(mk, 1); guard++;
       }
     }
