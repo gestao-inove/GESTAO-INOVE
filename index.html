@@ -2197,6 +2197,7 @@ function CartoesView({ cartoes, compras, onAddCartao, onDeleteCartao, onAddCompr
   const [mesDetalhe, setMesDetalhe] = useState(null);
   const [detalheGeralAberto, setDetalheGeralAberto] = useState(false);
   const [faturaAberta, setFaturaAberta] = useState(null);
+  const [comprasAberto, setComprasAberto] = useState(true);
   const [refMes, setRefMes] = useState(monthKey(todayStr()));
   const pagamentoDe = (cartaoId, mk) =>
     (pagamentosFatura || []).find((p) => p.cartaoId === cartaoId && p.mes === mk) || null;
@@ -2274,10 +2275,14 @@ function CartoesView({ cartoes, compras, onAddCartao, onDeleteCartao, onAddCompr
           </div>
         </div>
 
-        <div className="text-xs font-semibold mb-2 capitalize" style={{ color: COLORS.inkSoft }}>Compras de {monthLabelShort(refMes)}</div>
-        {comprasCartao.filter((c) => parcelaInfo(c, refMes)).length === 0 && (
+        <button onClick={() => setComprasAberto((v) => !v)} className="w-full flex items-center gap-1.5 mb-2" title={comprasAberto ? "Recolher" : "Expandir"}>
+          <span className="text-xs font-semibold capitalize" style={{ color: COLORS.inkSoft }}>Compras de {monthLabelShort(refMes)}</span>
+          <span className="ml-auto">{comprasAberto ? <ChevronDown size={15} color={COLORS.inkSoft} /> : <ChevronRight size={15} color={COLORS.inkSoft} />}</span>
+        </button>
+        {comprasAberto && comprasCartao.filter((c) => parcelaInfo(c, refMes)).length === 0 && (
           <p className="text-sm py-6 text-center rounded-lg" style={{ color: COLORS.inkSoft, backgroundColor: "#F1F3F6" }}>Nenhuma compra em {monthLabelShort(refMes)}</p>
         )}
+        {comprasAberto && (
         <div className="space-y-2">
           {comprasCartao.filter((c) => parcelaInfo(c, refMes)).map((c) => {
             const p = parcelaInfo(c, refMes);
@@ -2317,6 +2322,7 @@ function CartoesView({ cartoes, compras, onAddCartao, onDeleteCartao, onAddCompr
             );
           })}
         </div>
+        )}
 
         {showAddCompra && <AddCompraModal cartaoId={cartao.id} dataInicial={refMes === monthKey(todayStr()) ? todayStr() : refMes + "-01"} onClose={() => setShowAddCompra(false)} onSave={onAddCompra} />}
         {showEstorno && <EstornoModal cartaoId={cartao.id} onClose={() => setShowEstorno(false)} onSave={onAddCompra} />}
@@ -2718,6 +2724,7 @@ function DespesasView({ despesas, onAdd, onEdit, onDelete, totalRecebidoNegocio,
   const totalPorTipo = (key) => despesas.filter((d) => d.tipo === key).reduce((s, d) => s + (d.valor || 0), 0);
   const [subTab, setSubTab] = useState("contas");
   const [mesDetalhe, setMesDetalhe] = useState(null);
+  const [despAberto, setDespAberto] = useState(true);
   const refMes = monthKey(todayStr());
   const totalCartaoEsteMes = cartoes.reduce((s, ct) => s + comprasCartao
     .filter((c) => c.cartaoId === ct.id)
@@ -2839,9 +2846,17 @@ function DespesasView({ despesas, onAdd, onEdit, onDelete, totalRecebidoNegocio,
             </button>
           </div>
 
-          {sorted.filter((d) => d.tipo === subTab).length === 0 && (
+          <button onClick={() => setDespAberto((v) => !v)} className="w-full flex items-center gap-1.5 mb-2" title={despAberto ? "Recolher" : "Expandir"}>
+            <span className="text-xs font-semibold" style={{ color: COLORS.inkSoft }}>Despesas lançadas</span>
+            <span className="ml-auto flex items-center gap-1 text-[11px]" style={{ color: COLORS.inkSoft }}>
+              {!despAberto && `${sorted.filter((d) => d.tipo === subTab).length} lançamento(s)`}
+              {despAberto ? <ChevronDown size={15} color={COLORS.inkSoft} /> : <ChevronRight size={15} color={COLORS.inkSoft} />}
+            </span>
+          </button>
+          {despAberto && sorted.filter((d) => d.tipo === subTab).length === 0 && (
             <p className="text-sm py-6 text-center rounded-lg" style={{ color: COLORS.inkSoft, backgroundColor: "#F1F3F6" }}>Nenhuma despesa lançada aqui</p>
           )}
+          {despAberto && (
           <div className="space-y-2">
             {sorted.filter((d) => d.tipo === subTab).map((d) => {
               const info = tipoDespesaInfo(d.tipo);
@@ -2867,6 +2882,7 @@ function DespesasView({ despesas, onAdd, onEdit, onDelete, totalRecebidoNegocio,
               );
             })}
           </div>
+          )}
         </div>
       )}
 
