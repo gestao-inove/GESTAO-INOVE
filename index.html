@@ -3131,11 +3131,93 @@ function EditClienteModal({ item, onClose, onSave }) {
   );
 }
 
-function ClientesView({ clientes, onAdd, onEdit, onDelete }) {
+function ClienteProfileModal({ nome, atendimentos, financeiro, onClose }) {
+  const n = normalizarNome(nome);
+  const contato = acharContato(nome, "");
+  const produtos = (atendimentos || [])
+    .filter((a) => normalizarNome(a.cliente) === n)
+    .sort((a, b) => String(b.criadoEm || b.dataSolicitacao || "").localeCompare(String(a.criadoEm || a.dataSolicitacao || "")));
+  const doCliente = (financeiro || []).filter((f) => normalizarNome(f.cliente) === n);
+  const recebido = doCliente.filter((f) => f.pago).reduce((s, f) => s + (f.valorPago || 0), 0);
+  const pendente = doCliente.filter((f) => !f.pago).reduce((s, f) => s + (f.valorPago || 0), 0);
+  const tel = (contato && contato.telefone) || getTelefone(nome);
+  const email = contato && contato.email;
+  const doc = contato && contato.documento;
+
+  const LinhaDado = ({ rotulo, valor }) => (
+    <div className="flex items-center justify-between py-1 text-xs">
+      <span style={{ color: COLORS.inkSoft }}>{rotulo}</span>
+      <span className="font-medium text-right" style={{ color: valor ? COLORS.ink : COLORS.inkSoft }}>{valor || "—"}</span>
+    </div>
+  );
+
+  return (
+    <Modal title="Perfil do cliente" onClose={onClose}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-base font-semibold min-w-0 truncate" style={{ color: COLORS.ink }}>{nome}</div>
+        <button onClick={() => abrirWhatsApp(nome, `Olá ${nome}, tudo bem? 😊`)}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium flex-shrink-0"
+                style={{ backgroundColor: "#128C4B1A", color: "#128C4B" }}>
+          <MessageCircle size={13} color="#128C4B" /> WhatsApp
+        </button>
+      </div>
+
+      <div className="rounded-lg p-3 mb-3" style={{ backgroundColor: "#F1F3F6" }}>
+        <div className="flex items-center gap-1.5 mb-1">
+          <Users size={14} color={COLORS.burgundy} />
+          <span className="text-xs font-semibold" style={{ color: COLORS.burgundy }}>Dados do cliente</span>
+        </div>
+        <LinhaDado rotulo="CPF / CNPJ" valor={doc ? formatarDocumento(doc) : ""} />
+        <LinhaDado rotulo="WhatsApp" valor={tel} />
+        <LinhaDado rotulo="E-mail" valor={email} />
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 mb-3">
+        <div className="rounded-lg p-3" style={{ backgroundColor: COLORS.green + "12" }}>
+          <div className="text-[11px]" style={{ color: COLORS.inkSoft }}>Já recebido</div>
+          <div className="text-sm font-bold" style={{ color: COLORS.green, fontFamily: "ui-monospace, monospace" }}>{fmtMoney(recebido)}</div>
+        </div>
+        <div className="rounded-lg p-3" style={{ backgroundColor: COLORS.camel + "1A" }}>
+          <div className="text-[11px]" style={{ color: COLORS.inkSoft }}>A receber</div>
+          <div className="text-sm font-bold" style={{ color: COLORS.camelDeep, fontFamily: "ui-monospace, monospace" }}>{fmtMoney(pendente)}</div>
+        </div>
+      </div>
+
+      <div className="text-xs font-semibold mb-2" style={{ color: COLORS.inkSoft }}>Produtos contratados ({produtos.length})</div>
+      {produtos.length === 0 && (
+        <p className="text-sm py-4 text-center rounded-lg" style={{ color: COLORS.inkSoft, backgroundColor: "#F1F3F6" }}>Nenhum produto encontrado para este cliente.</p>
+      )}
+      <div className="space-y-2">
+        {produtos.map((a) => (
+          <div key={a.id} className="rounded-lg p-3" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <Stamp categoria={a.categoria} subtipo={a.subtipo} />
+              <span className="text-[11px] px-2 py-0.5 rounded-full font-semibold" style={{ backgroundColor: "#F1F3F6", color: COLORS.inkSoft }}>
+                {statusLabel(a.categoria, statusDoItem(a))}
+              </span>
+            </div>
+            <div className="text-[11px] mt-1.5" style={{ color: COLORS.inkSoft }}>
+              {a.seguradora ? `${a.seguradora} · ` : ""}
+              {a.valor != null ? `Valor ${fmtMoney(a.valor)}` : ""}
+              {a.categoria === "seguro" && a.valorComissao != null ? ` · Comissão ${fmtMoney(a.valorComissao)}` : ""}
+            </div>
+            <div className="text-[11px]" style={{ color: COLORS.inkSoft }}>
+              Solicitado em {fmtDatePt(a.dataSolicitacao || (a.criadoEm || "").slice(0, 10))}
+              {a.dataAgendamento ? ` · Agendado ${fmtDatePt(a.dataAgendamento)}` : ""}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
+function ClientesView({ clientes, atendimentos, financeiro, onAdd, onEdit, onDelete }) {
   const [subTab, setSubTab] = useState("certificado");
   const [showAdd, setShowAdd] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [filtroVenc, setFiltroVenc] = useState(null);
+  const [perfil, setPerfil] = useState(null);
 
   const todosDaCategoria = clientes.filter((c) => c.categoria === subTab)
     .map((c) => ({ ...c, ...proximoVencimento(c.dataInicio, c.dataVencimento) }))
@@ -3202,7 +3284,7 @@ function ClientesView({ clientes, onAdd, onEdit, onDelete }) {
           <div key={c.id} className="rounded-lg p-3" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-sm font-semibold truncate" style={{ color: COLORS.ink }}>{c.nome}</div>
+                <button onClick={() => setPerfil(c.nome)} className="text-sm font-semibold truncate text-left hover:underline" style={{ color: COLORS.burgundy }} title="Ver perfil do cliente">{c.nome}</button>
                 <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                   <Stamp categoria={c.categoria} subtipo={c.subtipo} />
                   <VencimentoBadge dataInicio={c.dataInicio} dataVencimento={c.dataVencimento} />
@@ -3231,6 +3313,7 @@ function ClientesView({ clientes, onAdd, onEdit, onDelete }) {
 
       {showAdd && <AddClienteModal categoriaFixa={subTab} onClose={() => setShowAdd(false)} onSave={onAdd} />}
       {editingItem && <EditClienteModal item={editingItem} onClose={() => setEditingItem(null)} onSave={onEdit} />}
+      {perfil && <ClienteProfileModal nome={perfil} atendimentos={atendimentos} financeiro={financeiro} onClose={() => setPerfil(null)} />}
     </div>
   );
 }
@@ -4080,7 +4163,7 @@ function App() {
           />
         )}
         {tab === "clientes" && (
-          <ClientesView clientes={clientes} onAdd={addCliente} onEdit={editCliente} onDelete={deleteCliente} />
+          <ClientesView clientes={clientes} atendimentos={atendimentos} financeiro={financeiro} onAdd={addCliente} onEdit={editCliente} onDelete={deleteCliente} />
         )}
       </div>
 
