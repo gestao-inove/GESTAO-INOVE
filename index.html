@@ -3105,6 +3105,10 @@ function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes, car
   const diasAteVenc = (d) => Math.round((new Date(d) - new Date(hojeStr2)) / 86400000);
   const iconePagar = { fixa: Repeat, gasto: Receipt, fatura: CreditCard };
 
+  // Fluxo de caixa projetado (6 meses) a partir do saldo atual disponível
+  const saldoAtual = totalPJ + totalPF;
+  const fluxo = projecaoFluxoCaixa(financeiro, despesas, cartoes, comprasCartao, pagamentosFatura, saldoAtual, 6);
+
   return (
     <div>
       <div className="rounded-lg p-2 mb-3 flex items-center justify-between" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
@@ -3171,6 +3175,46 @@ function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes, car
                 );
               })}
             </div>
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-lg mb-3 overflow-hidden" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
+        <button onClick={() => setFluxoAberto((v) => !v)} className="w-full flex items-center gap-2 px-3 py-2.5">
+          <TrendingUp size={15} color={COLORS.burgundy} />
+          <span className="text-sm font-semibold text-left" style={{ color: COLORS.ink }}>Fluxo de caixa projetado · 6 meses</span>
+          <span className="ml-auto">{fluxoAberto ? <ChevronDown size={16} color={COLORS.inkSoft} /> : <ChevronRight size={16} color={COLORS.inkSoft} />}</span>
+        </button>
+        {fluxoAberto && (
+          <div className="px-2 pb-2">
+            <p className="text-[11px] px-1 mb-1.5" style={{ color: COLORS.inkSoft }}>
+              Começa no saldo atual ({fmtMoney(saldoAtual)}) e projeta com o que você tem a receber e a pagar.
+            </p>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 420 }}>
+                <thead>
+                  <tr style={{ backgroundColor: "#F1F3F6" }}>
+                    {["Mês", "Entradas", "Saídas", "Saldo previsto"].map((h, i) => (
+                      <th key={i} className="text-[10px] font-semibold uppercase px-2 py-1.5"
+                          style={{ color: COLORS.inkSoft, textAlign: i === 0 ? "left" : "right" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {fluxo.map((m) => (
+                    <tr key={m.mes} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+                      <td className="px-2 py-1.5 text-xs font-medium capitalize" style={{ color: COLORS.ink }}>{monthLabelShort(m.mes)}</td>
+                      <td className="px-2 py-1.5 text-xs text-right" style={{ color: COLORS.green, fontFamily: "ui-monospace, monospace" }}>{m.entradas ? "+ " + fmtMoney(m.entradas) : "—"}</td>
+                      <td className="px-2 py-1.5 text-xs text-right" style={{ color: COLORS.red, fontFamily: "ui-monospace, monospace" }}>{m.saidas ? "− " + fmtMoney(m.saidas) : "—"}</td>
+                      <td className="px-2 py-1.5 text-xs text-right font-bold" style={{ color: m.saldo < 0 ? COLORS.red : COLORS.ink, fontFamily: "ui-monospace, monospace" }}>{fmtMoney(m.saldo)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {fluxo.some((m) => m.saldo < 0) && (
+              <p className="text-[11px] px-1 mt-1.5" style={{ color: COLORS.red }}>⚠️ O saldo fica negativo em algum mês — confira as "Contas a pagar" acima.</p>
+            )}
           </div>
         )}
       </div>
