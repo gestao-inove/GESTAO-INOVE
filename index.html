@@ -90,6 +90,7 @@ const MessageCircle = (p) => <Svg {...p}><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z
 const Download = (p) => <Svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></Svg>;
 const Upload = (p) => <Svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></Svg>;
 const Star = (p) => <Svg {...p}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></Svg>;
+const Menu = (p) => <Svg {...p}><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/></Svg>;
 
 // ====== DADOS FIXOS ======
 const STATUSES = [
@@ -3605,6 +3606,93 @@ function ProximosVencimentos({ clientes }) {
   );
 }
 
+// ====== DASHBOARD (tela inicial) ======
+function DashboardView({ atendimentos, clientes, financeiro, agendamentos, despesas, contas, movimentacoes, cartoes, comprasCartao, pagamentosFatura, onIr }) {
+  const mk = monthKey(todayStr());
+  const hoje = todayStr();
+  const receitaMes = financeiro.filter((f) => f.pago && monthKey(f.data) === mk).reduce((s, f) => s + (f.valorPago || 0), 0);
+  const custosMes = financeiro.filter((f) => f.pago && monthKey(f.data) === mk).reduce((s, f) => s + (f.custo || 0), 0);
+  const gastosMes = (despesas || []).filter((d) => gastoNoMes(d, mk)).reduce((s, d) => s + (d.valor || 0), 0);
+  const saldoMes = receitaMes - custosMes - gastosMes;
+  const aReceberMes = financeiro.filter((f) => !f.pago && monthKey(f.data) === mk).reduce((s, f) => s + (f.valorPago || 0), 0);
+  const agendPend = (agendamentos || []).filter((a) => (a.data || "") >= hoje).length;
+  const atrasados = financeiro.filter((f) => !f.pago && f.data && f.data < hoje);
+  const totalAtrasado = atrasados.reduce((s, f) => s + (f.valorPago || 0), 0);
+  const certPendentes = atendimentos.filter((a) => a.categoria === "certificado" && !["emitido", "finalizado"].includes(statusDoItem(a))).length;
+  const segurosVencendo = clientes.filter((c) => c.categoria === "seguro")
+    .map((c) => proximoVencimento(c.dataInicio, c.dataVencimento)).filter((v) => v.dias <= 30).length;
+  const totalPJ = (contas || []).filter((c) => c.tipo === "pj").reduce((s, c) => s + saldoDaConta(c, movimentacoes || [], fluxoNegocioConta(financeiro, despesas)), 0);
+  const totalPF = (contas || []).filter((c) => (c.tipo || "pf") === "pf").reduce((s, c) => s + saldoDaConta(c, movimentacoes || []), 0);
+  const fluxo = projecaoFluxoCaixa(financeiro, despesas, cartoes, comprasCartao, pagamentosFatura, totalPJ + totalPF, 6);
+
+  const tiles = [
+    { label: "Total de Clientes", valor: clientes.length, sub: "cadastrados", Icon: Users, cor: COLORS.burgundy, ir: "clientes", numero: true },
+    { label: "Seguros vencendo", valor: segurosVencendo, sub: "próximos 30 dias", Icon: ShieldCheck, cor: COLORS.skyBlue, ir: "clientes", numero: true },
+    { label: "Receita do mês", valor: receitaMes, sub: monthLabelShort(mk), Icon: TrendingUp, cor: COLORS.green, ir: "financeiro" },
+    { label: "Agendamentos", valor: agendPend, sub: "compromissos", Icon: CalendarPlus, cor: COLORS.camelDeep, ir: "calendario", numero: true },
+    { label: "Parcelas em atraso", valor: atrasados.length, sub: fmtMoney(totalAtrasado), Icon: Bell, cor: COLORS.red, ir: "financeiro", numero: true },
+    { label: "Certificados pendentes", valor: certPendentes, sub: "a emitir", Icon: Clock, cor: COLORS.slate, ir: "kanban", numero: true },
+    { label: "Saldo do mês", valor: saldoMes, sub: "recebido − custos − gastos", Icon: Wallet, cor: COLORS.burgundy, ir: "financeiro" },
+    { label: "A receber", valor: aReceberMes, sub: "este mês", Icon: Hourglass, cor: COLORS.camelDeep, ir: "financeiro" },
+  ];
+
+  return (
+    <div>
+      <h2 className="text-lg font-semibold" style={{ color: COLORS.ink, letterSpacing: "-0.2px" }}>Dashboard</h2>
+      <p className="text-xs mb-4 capitalize" style={{ color: COLORS.inkSoft }}>{hojeExtenso()}</p>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        {tiles.map((t, i) => (
+          <button key={i} onClick={() => onIr(t.ir)}
+                  className="rounded-lg p-4 text-left overflow-hidden relative"
+                  style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}`, borderBottom: `3px solid ${t.cor}` }}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="text-[11px] font-medium" style={{ color: COLORS.inkSoft }}>{t.label}</div>
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: t.cor + "1A" }}>
+                <t.Icon size={16} color={t.cor} />
+              </div>
+            </div>
+            <div className="text-xl font-bold mt-1.5" style={{ color: COLORS.ink, fontFamily: "ui-monospace, monospace" }}>
+              {t.numero ? t.valor : fmtMoney(t.valor)}
+            </div>
+            <div className="text-[10px] mt-0.5 truncate" style={{ color: COLORS.inkSoft }}>{t.sub}</div>
+          </button>
+        ))}
+      </div>
+
+      <div className="rounded-lg p-4 mb-4" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
+        <div className="flex items-center gap-1.5 mb-2">
+          <TrendingUp size={15} color={COLORS.burgundy} />
+          <h3 className="text-sm font-semibold" style={{ color: COLORS.ink }}>Fluxo de caixa — próximos 6 meses</h3>
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 420 }}>
+            <thead>
+              <tr style={{ backgroundColor: "#F1F3F6" }}>
+                {["Mês", "Entradas", "Saídas", "Saldo previsto"].map((h, i) => (
+                  <th key={i} className="text-[10px] font-semibold uppercase px-2 py-1.5" style={{ color: COLORS.inkSoft, textAlign: i === 0 ? "left" : "right" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {fluxo.map((m) => (
+                <tr key={m.mes} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+                  <td className="px-2 py-1.5 text-xs font-medium capitalize" style={{ color: COLORS.ink }}>{monthLabelShort(m.mes)}</td>
+                  <td className="px-2 py-1.5 text-xs text-right" style={{ color: COLORS.green, fontFamily: "ui-monospace, monospace" }}>{m.entradas ? "+ " + fmtMoney(m.entradas) : "—"}</td>
+                  <td className="px-2 py-1.5 text-xs text-right" style={{ color: COLORS.red, fontFamily: "ui-monospace, monospace" }}>{m.saidas ? "− " + fmtMoney(m.saidas) : "—"}</td>
+                  <td className="px-2 py-1.5 text-xs text-right font-bold" style={{ color: m.saldo < 0 ? COLORS.red : COLORS.ink, fontFamily: "ui-monospace, monospace" }}>{fmtMoney(m.saldo)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <ProximosVencimentos clientes={clientes} />
+    </div>
+  );
+}
+
 // ====== BACKUP DOS DADOS ======
 function BackupModal({ dados, onRestaurar, onClose }) {
   const { atendimentos, agendamentos, financeiro, despesas, cartoes, comprasCartao, clientes,
@@ -3841,7 +3929,8 @@ function TelaLogin({ onEntrar }) {
 // ====== APP ======
 function App() {
   const [logado, setLogado] = useState(false);
-  const [tab, setTab] = useState("kanban");
+  const [tab, setTab] = useState("dashboard");
+  const [menuAberto, setMenuAberto] = useState(false);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState("");
   const [atendimentos, setAtendimentos] = useState([]);
@@ -4342,11 +4431,13 @@ function App() {
   };
 
   const tabs = [
-    { key: "kanban", label: "Atendimentos", icon: LayoutGrid },
+    { key: "dashboard", label: "Dashboard", icon: LayoutGrid },
+    { key: "kanban", label: "Atendimentos", icon: Shield },
     { key: "calendario", label: "Calendário", icon: CalendarIcon },
     { key: "financeiro", label: "Financeiro", icon: Wallet },
     { key: "clientes", label: "Clientes", icon: Users },
   ];
+  const tabAtual = tabs.find((t) => t.key === tab) || tabs[0];
 
   if (!logado) {
     return <TelaLogin onEntrar={() => setLogado(true)} />;
@@ -4360,6 +4451,42 @@ function App() {
     );
   }
 
+  const menuLateral = (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-2.5 px-4 py-4">
+        <img src={LOGO_B64} alt="Inove" className="w-9 h-9 rounded-full flex-shrink-0" style={{ boxShadow: "0 0 0 1px rgba(255,255,255,0.18)" }} />
+        <div className="min-w-0">
+          <div className="text-base leading-none text-white" style={{ fontWeight: 600, letterSpacing: "1.4px" }}>INOVE</div>
+          <div className="text-[9px] leading-tight mt-1" style={{ color: "#9FB0CC", letterSpacing: "0.3px" }}>SEGUROS &amp; SOLUÇÕES</div>
+        </div>
+      </div>
+      <nav className="flex-1 px-2 py-2 space-y-0.5 overflow-y-auto">
+        {tabs.map((t) => {
+          const Icon = t.icon;
+          const active = tab === t.key;
+          return (
+            <button key={t.key} onClick={() => { setTab(t.key); setMenuAberto(false); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm text-left"
+                    style={{ backgroundColor: active ? "rgba(255,255,255,0.12)" : "transparent",
+                             color: active ? "#fff" : "#9FB0CC", fontWeight: active ? 600 : 500,
+                             borderLeft: active ? `3px solid ${COLORS.camel}` : "3px solid transparent" }}>
+              <Icon size={17} color={active ? COLORS.camel : "#9FB0CC"} />
+              {t.label}
+            </button>
+          );
+        })}
+      </nav>
+      <div className="px-2 py-3 space-y-0.5" style={{ borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+        <button onClick={() => { setShowBackup(true); setMenuAberto(false); }} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-left hover:bg-white/5" style={{ color: "#9FB0CC" }}>
+          <Download size={16} color="#9FB0CC" /> Backup
+        </button>
+        <button onClick={() => { SESSION_TOKEN = null; setLogado(false); }} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-left hover:bg-white/5" style={{ color: "#9FB0CC" }}>
+          <LogOut size={16} color="#9FB0CC" /> Sair
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="min-h-screen" style={{
       backgroundColor: COLORS.bg,
@@ -4369,58 +4496,25 @@ function App() {
       backgroundSize: "auto, 85vmin 85vmin",
       backgroundAttachment: "fixed",
     }}>
-      <div className="sticky top-0 z-10">
-        <div className="px-4 py-3" style={{ backgroundColor: COLORS.burgundy }}>
-          <div className="flex items-center gap-3">
-            <img src={LOGO_B64} alt="Inove" className="w-9 h-9 rounded-full flex-shrink-0" style={{ boxShadow: "0 0 0 1px rgba(255,255,255,0.18)" }} />
-            <div className="min-w-0">
-              <h1 className="text-lg leading-tight text-white" style={{ fontWeight: 600, letterSpacing: "1.6px" }}>INOVE</h1>
-              <p className="text-[10px] leading-tight" style={{ color: "#9FB0CC", letterSpacing: "0.4px" }}>SEGUROS E SOLUÇÕES FINANCEIRAS · CERTIFICAÇÃO DIGITAL</p>
+    <div className="flex min-h-screen">
+      <aside className="hidden md:block md:w-60 md:flex-shrink-0 md:sticky md:top-0 md:h-screen" style={{ backgroundColor: COLORS.burgundy }}>
+        {menuLateral}
+      </aside>
+      <div className="flex-1 min-w-0">
+        <div className="sticky top-0 z-20 flex items-center gap-2 px-4 py-2.5" style={{ backgroundColor: "#fff", borderBottom: `1px solid ${COLORS.line}` }}>
+          <button className="md:hidden p-1.5 rounded-md hover:bg-black/5 flex-shrink-0" onClick={() => setMenuAberto(true)} title="Menu">
+            <Menu size={20} color={COLORS.ink} />
+          </button>
+          <div className="text-base font-semibold truncate" style={{ color: COLORS.ink }}>{tabAtual.label}</div>
+          <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+            <div className="flex items-center gap-1 px-1.5 py-1 rounded-md" style={{ border: `1px solid ${COLORS.line}` }}>
+              <button onClick={() => setMesKanban(addMonths(mesKanban, -1))} className="p-0.5 rounded hover:bg-black/5"><ChevronLeft size={15} color={COLORS.inkSoft} /></button>
+              <span className="text-xs font-semibold capitalize" style={{ minWidth: 92, textAlign: "center", color: COLORS.ink }}>{monthLabelShort(mesKanban)}</span>
+              <button onClick={() => setMesKanban(addMonths(mesKanban, 1))} className="p-0.5 rounded hover:bg-black/5"><ChevronRight size={15} color={COLORS.inkSoft} /></button>
             </div>
-            <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
-              <button onClick={() => setShowBackup(true)} className="p-2 rounded-md hover:bg-white/10" title="Backup dos dados">
-                <Download size={16} color="#9FB0CC" />
-              </button>
-              <button onClick={carregarTudo} className="p-2 rounded-md hover:bg-white/10" title="Atualizar">
-                <RefreshCw size={16} color="#9FB0CC" />
-              </button>
-              <button onClick={() => { SESSION_TOKEN = null; setLogado(false); }} className="p-2 rounded-md hover:bg-white/10" title="Sair">
-                <LogOut size={16} color="#9FB0CC" />
-              </button>
-              <div className="flex flex-col items-end ml-1">
-                <div className="flex items-center gap-1 px-1.5 py-1 rounded-md" style={{ border: "1px solid rgba(255,255,255,0.22)" }}>
-                  <button onClick={() => setMesKanban(addMonths(mesKanban, -1))} className="p-0.5 rounded hover:bg-white/10">
-                    <ChevronLeft size={15} color="#fff" />
-                  </button>
-                  <span className="text-xs font-semibold text-white capitalize" style={{ minWidth: 104, textAlign: "center" }}>{monthLabelLong(mesKanban)}</span>
-                  <button onClick={() => setMesKanban(addMonths(mesKanban, 1))} className="p-0.5 rounded hover:bg-white/10">
-                    <ChevronRight size={15} color="#fff" />
-                  </button>
-                </div>
-                <span className="text-[10px] capitalize mt-1" style={{ color: "#9FB0CC" }}>{hojeExtenso()}</span>
-              </div>
-            </div>
+            <button onClick={carregarTudo} className="p-2 rounded-md hover:bg-black/5" title="Atualizar"><RefreshCw size={16} color={COLORS.inkSoft} /></button>
           </div>
         </div>
-
-        <div className="flex px-4" style={{ backgroundColor: "#fff", borderBottom: `1px solid ${COLORS.line}` }}>
-          {tabs.map((t) => {
-            const Icon = t.icon;
-            const active = tab === t.key;
-            return (
-              <button key={t.key} onClick={() => setTab(t.key)}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs"
-                      style={{ color: active ? COLORS.burgundy : COLORS.inkSoft,
-                               fontWeight: active ? 600 : 500,
-                               borderBottom: active ? `2px solid ${COLORS.camel}` : "2px solid transparent",
-                               marginBottom: "-1px" }}>
-                <Icon size={15} color={active ? COLORS.burgundy : COLORS.inkSoft} />
-                {t.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
 
       <div className="px-4 pt-5 pb-10">
         {erro && (
@@ -4430,6 +4524,7 @@ function App() {
             <button onClick={carregarTudo} className="font-semibold underline flex-shrink-0">Tentar de novo</button>
           </div>
         )}
+        {tab === "dashboard" && <DashboardView atendimentos={atendimentos} clientes={clientes} financeiro={financeiro} agendamentos={agendamentos} despesas={despesas} contas={contas} movimentacoes={movimentacoes} cartoes={cartoes} comprasCartao={comprasCartao} pagamentosFatura={pagamentosFatura} onIr={setTab} />}
         {tab === "kanban" && <KanbanBoard atendimentos={atendimentos} onAdd={addAtendimento} onMove={moveAtendimento} onDelete={deleteAtendimento} onEdit={editAtendimento} clientes={clientes} mesKanban={mesKanban} financeiro={financeiro} />}
         {tab === "calendario" && <CalendarView agendamentos={agendamentos} onAdd={addAgendamento} onDelete={deleteAgendamento} />}
         {tab === "financeiro" && (
@@ -4448,6 +4543,15 @@ function App() {
           <ClientesView clientes={clientes} atendimentos={atendimentos} financeiro={financeiro} onAdd={addCliente} onEdit={editCliente} onDelete={deleteCliente} />
         )}
       </div>
+      </div>
+    </div>
+
+      {menuAberto && (
+        <div className="fixed inset-0 z-40 md:hidden">
+          <div className="absolute inset-0" style={{ backgroundColor: "rgba(0,0,0,0.45)" }} onClick={() => setMenuAberto(false)} />
+          <aside className="absolute left-0 top-0 bottom-0 w-64" style={{ backgroundColor: COLORS.burgundy }}>{menuLateral}</aside>
+        </div>
+      )}
 
       {showBackup && (
         <BackupModal
