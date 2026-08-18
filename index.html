@@ -1864,7 +1864,12 @@ function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
                     tipo="pj" titulo="Contas da empresa" tituloTotal="Total nas contas da empresa (PJ)"
                     fluxoNegocio={fluxoNegocio} onSetPrincipal={onSetPrincipal}
                     onAddConta={onAddConta} onDeleteConta={onDeleteConta}
-                    onAddMov={onAddMov} onDeleteMov={onDeleteMov} />
+                    onAddMov={onAddMov} onDeleteMov={onDeleteMov}
+                    onExcluirAuto={(m) => { if (m.origem === "financeiro") onDelete(m.origemId); else if (m.origem === "despesa") onDeleteDespesa(m.origemId); }}
+                    onEditarAuto={(m) => {
+                      if (m.origem === "financeiro") { const f = financeiro.find((x) => x.id === m.origemId); if (f) setEditingItem(f); }
+                      else if (m.origem === "despesa") { const d = despesas.find((x) => x.id === m.origemId); if (d) setEditingGasto(d); }
+                    }} />
       </div>
 
       {showAdd && <AddFinanceModal onClose={() => setShowAdd(false)} onSave={onAdd} />}
@@ -2539,12 +2544,12 @@ function fluxoNegocioConta(financeiro, despesas) {
       movs.push({ id: "auto-rec-" + f.id, auto: true, tipo: "entrada", valor: f.valorPago || 0,
                   descricao: "Recebido · " + f.cliente
                     + (f.totalParcelas > 1 ? ` (comissão ${f.parcela}/${f.totalParcelas})` : ""),
-                  data: f.data });
+                  data: f.data, origem: "financeiro", origemId: f.id });
     }
     // O custo do atendimento (ex: custo do certificado) sai da conta, para mostrar o valor real
     if (f.pago && (f.custo || 0) > 0) {
       movs.push({ id: "auto-custo-" + f.id, auto: true, tipo: "saida", valor: f.custo,
-                  descricao: "Custo · " + f.cliente, data: f.data });
+                  descricao: "Custo · " + f.cliente, data: f.data, origem: "financeiro", origemId: f.id });
     }
   });
   const hoje = todayStr();
@@ -2554,7 +2559,7 @@ function fluxoNegocioConta(financeiro, despesas) {
       // Abate quando a data já chegou OU quando você marcou como Pago (pagou antes)
       if (d.pago || (d.data || "") <= hoje) {
         movs.push({ id: "auto-gasto-" + d.id, auto: true, tipo: "saida", valor: d.valor || 0,
-                    descricao: "Gasto · " + d.titulo, data: d.data });
+                    descricao: "Gasto · " + d.titulo, data: d.data, origem: "despesa", origemId: d.id });
       }
     } else if (d.tipo === "negocio_fixa") {
       // Conta fixa recorre todo mês. Abate as datas que já passaram; se marcada Pago, abate também a do mês atual antes da data.
@@ -2565,7 +2570,7 @@ function fluxoNegocioConta(financeiro, despesas) {
         const dataOcorrencia = mk + "-" + dia;
         if (dataOcorrencia <= hoje || (d.pago && mk === mesAtual)) {
           movs.push({ id: "auto-fix-" + d.id + "-" + mk, auto: true, tipo: "saida", valor: d.valor || 0,
-                      descricao: "Conta fixa · " + d.titulo, data: dataOcorrencia });
+                      descricao: "Conta fixa · " + d.titulo, data: dataOcorrencia, origem: "despesa", origemId: d.id });
         }
         mk = addMonths(mk, 1); guard++;
       }
@@ -2599,18 +2604,18 @@ function AddContaModal({ onClose, onSave, tipo }) {
   );
 }
 
-function AddMovimentacaoModal({ conta, onClose, onSave }) {
-  const [tipo, setTipo] = useState("entrada");
-  const [valor, setValor] = useState("");
-  const [descricao, setDescricao] = useState("");
-  const [data, setData] = useState(todayStr());
+function AddMovimentacaoModal({ conta, item, onClose, onSave }) {
+  const [tipo, setTipo] = useState(item ? item.tipo : "entrada");
+  const [valor, setValor] = useState(item ? String(item.valor) : "");
+  const [descricao, setDescricao] = useState(item ? (item.descricao || "") : "");
+  const [data, setData] = useState(item ? item.data : todayStr());
   const submit = () => {
     if (!valor) return;
-    onSave({ id: uid(), contaId: conta.id, tipo, valor: parseFloat(valor) || 0, descricao: descricao.trim(), data });
+    onSave({ id: item ? item.id : uid(), contaId: conta.id, tipo, valor: parseFloat(valor) || 0, descricao: descricao.trim(), data });
     onClose();
   };
   return (
-    <Modal title={`Movimentação · ${conta.nome}`} onClose={onClose}>
+    <Modal title={`${item ? "Editar movimentação" : "Movimentação"} · ${conta.nome}`} onClose={onClose}>
       <Field label="Tipo">
         <div className="flex gap-2">
           <Toggle ativo={tipo === "entrada"} cor={COLORS.green} onClick={() => setTipo("entrada")}>Entrada</Toggle>
@@ -2630,17 +2635,25 @@ function AddMovimentacaoModal({ conta, onClose, onSave }) {
         <input style={inputStyle} value={descricao} onChange={(e) => setDescricao(e.target.value)}
                placeholder={tipo === "entrada" ? "Ex: Comissão recebida" : "Ex: Pagamento do cartão"} />
       </Field>
-      <PrimaryButton onClick={submit}>Salvar movimentação</PrimaryButton>
+      <PrimaryButton onClick={submit}>{item ? "Salvar alterações" : "Salvar movimentação"}</PrimaryButton>
     </Modal>
   );
 }
 
 function ContasView({ contas, movimentacoes, onAddConta, onDeleteConta, onAddMov, onDeleteMov,
-                      tipo, titulo, tituloTotal, mostrarTotal, fluxoNegocio, onSetPrincipal }) {
+                      tipo, titulo, tituloTotal, mostrarTotal, fluxoNegocio, onSetPrincipal,
+                      onExcluirAuto, onEditarAuto }) {
   const [showAddConta, setShowAddConta] = useState(false);
   const [movDaConta, setMovDaConta] = useState(null);
   const [aberta, setAberta] = useState(null);
+  const [acaoLanc, setAcaoLanc] = useState(null); // id do lançamento com as opções abertas
+  const [editandoMov, setEditandoMov] = useState(null); // { mov, conta }
   const podeDesignar = tipo === "pj" && typeof onSetPrincipal === "function";
+  // Salva a edição de uma movimentação manual (recria com o mesmo id, já que não há PATCH)
+  const salvarEdicaoMov = async (nv) => {
+    await onDeleteMov(nv.id);
+    await onAddMov(nv);
+  };
 
   const totalGeral = contas.reduce((s, c) => s + saldoDaConta(c, movimentacoes, fluxoNegocio), 0);
 
@@ -2723,25 +2736,36 @@ function ContasView({ contas, movimentacoes, onAddConta, onDeleteConta, onAddMov
                     <span style={{ fontFamily: "ui-monospace, monospace" }}>{fmtMoney(c.saldoInicial)}</span>
                   </div>
                   {movs.length === 0 && <p className="text-[11px] py-2 text-center" style={{ color: COLORS.inkSoft }}>Nenhuma movimentação ainda</p>}
-                  {movs.map((m) => (
-                    <div key={m.id} className="flex items-center gap-2 text-xs py-1.5" style={{ borderTop: `1px dashed ${COLORS.line}` }}>
-                      <span className="flex-1 min-w-0 truncate" style={{ color: COLORS.ink }}>
-                        {m.descricao || (m.tipo === "entrada" ? "Entrada" : "Saída")}
-                        {m.auto && <span className="ml-1 px-1 py-0.5 rounded text-[9px] font-bold" style={{ backgroundColor: COLORS.line, color: COLORS.inkSoft }}>auto</span>}
-                        <span style={{ color: COLORS.inkSoft }}> · {fmtDatePt(m.data)}</span>
-                      </span>
-                      <span className="font-bold flex-shrink-0" style={{ color: m.tipo === "entrada" ? COLORS.green : COLORS.red, fontFamily: "ui-monospace, monospace" }}>
-                        {m.tipo === "entrada" ? "+" : "−"} {fmtMoney(m.valor)}
-                      </span>
-                      {m.auto ? (
-                        <span className="w-6 flex-shrink-0" />
-                      ) : (
-                        <button onClick={() => onDeleteMov(m.id)} className="p-1 rounded hover:bg-black/5 flex-shrink-0" title="Excluir">
-                          <Trash2 size={12} color={COLORS.inkSoft} />
+                  {movs.map((m) => {
+                    const ativo = acaoLanc === m.id;
+                    return (
+                    <div key={m.id} style={{ borderTop: `1px dashed ${COLORS.line}` }}>
+                      <div className="flex items-center gap-2 text-xs py-1.5">
+                        <button onClick={() => setAcaoLanc(ativo ? null : m.id)} className="flex-1 min-w-0 truncate text-left hover:underline" style={{ color: COLORS.ink }} title="Toque para editar ou excluir">
+                          {m.descricao || (m.tipo === "entrada" ? "Entrada" : "Saída")}
+                          {m.auto && <span className="ml-1 px-1 py-0.5 rounded text-[9px] font-bold" style={{ backgroundColor: COLORS.line, color: COLORS.inkSoft }}>auto</span>}
+                          <span style={{ color: COLORS.inkSoft }}> · {fmtDatePt(m.data)}</span>
                         </button>
+                        <span className="font-bold flex-shrink-0" style={{ color: m.tipo === "entrada" ? COLORS.green : COLORS.red, fontFamily: "ui-monospace, monospace" }}>
+                          {m.tipo === "entrada" ? "+" : "−"} {fmtMoney(m.valor)}
+                        </span>
+                      </div>
+                      {ativo && (
+                        <div className="flex items-center gap-1.5 pb-2 pl-1 flex-wrap">
+                          <button onClick={() => { setAcaoLanc(null); if (m.auto) { if (onEditarAuto) onEditarAuto(m); } else { setEditandoMov({ mov: m, conta: c }); } }}
+                                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold" style={{ backgroundColor: COLORS.burgundy + "12", color: COLORS.burgundy }}>
+                            <PenLine size={12} color={COLORS.burgundy} /> Editar
+                          </button>
+                          <button onClick={() => { setAcaoLanc(null); if (m.auto) { if (onExcluirAuto) onExcluirAuto(m); } else { onDeleteMov(m.id); } }}
+                                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold" style={{ backgroundColor: COLORS.red + "14", color: COLORS.red }}>
+                            <Trash2 size={12} color={COLORS.red} /> Excluir
+                          </button>
+                          {m.auto && <span className="text-[10px]" style={{ color: COLORS.inkSoft }}>mexe no recebimento/gasto de origem</span>}
+                        </div>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -2751,6 +2775,7 @@ function ContasView({ contas, movimentacoes, onAddConta, onDeleteConta, onAddMov
 
       {showAddConta && <AddContaModal tipo={tipo} onClose={() => setShowAddConta(false)} onSave={onAddConta} />}
       {movDaConta && <AddMovimentacaoModal conta={movDaConta} onClose={() => setMovDaConta(null)} onSave={onAddMov} />}
+      {editandoMov && <AddMovimentacaoModal conta={editandoMov.conta} item={editandoMov.mov} onClose={() => setEditandoMov(null)} onSave={salvarEdicaoMov} />}
     </div>
   );
 }
