@@ -2939,8 +2939,45 @@ function DespesasView({ despesas, onAdd, onEdit, onDelete, totalRecebidoNegocio,
   );
 }
 
-function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes }) {
+// Monta a lista de "contas a pagar" dos próximos ~2 meses:
+// gastos avulsos não pagos (com data), próxima ocorrência das contas fixas, e faturas de cartão em aberto.
+function montarContasAPagar(despesas, cartoes, comprasCartao, pagamentosFatura) {
+  const hoje = todayStr();
+  const limite = addMesesData(hoje, 2);
+  const itens = [];
+  (despesas || []).forEach((d) => {
+    const recorrente = d.tipo === "fixa" || d.tipo === "negocio_fixa";
+    const empresa = d.tipo === "negocio_fixa" || d.tipo === "negocio_avulso";
+    if (recorrente) {
+      const dia = (d.data || "").slice(8, 10) || "01";
+      let nd = monthKey(hoje) + "-" + dia;
+      if (nd < hoje) nd = addMonths(monthKey(hoje), 1) + "-" + dia;
+      if (d.pago && monthKey(nd) === monthKey(hoje)) return; // já paga neste ciclo
+      if (nd <= limite) itens.push({ id: "fix-" + d.id, tipo: "fixa", titulo: d.titulo, empresa, valor: d.valor || 0, data: nd, atrasada: false });
+    } else {
+      if (d.pago || !d.data) return;
+      itens.push({ id: "desp-" + d.id, tipo: "gasto", titulo: d.titulo, empresa, valor: d.valor || 0, data: d.data, atrasada: d.data < hoje });
+    }
+  });
+  (cartoes || []).forEach((ct) => {
+    for (let i = 0; i < 3; i++) {
+      const mk = addMonths(monthKey(hoje), i);
+      const total = (comprasCartao || []).filter((c) => c.cartaoId === ct.id)
+        .reduce((s, c) => { const p = parcelaInfo(c, mk); return p ? s + c.valorParcela : s; }, 0);
+      if (total <= 0) continue;
+      if ((pagamentosFatura || []).some((p) => p.cartaoId === ct.id && p.mes === mk)) continue;
+      const dia = ct.diaVencimento ? String(ct.diaVencimento).padStart(2, "0") : "10";
+      const data = mk + "-" + dia;
+      if (data > limite) continue;
+      itens.push({ id: "fat-" + ct.id + "-" + mk, tipo: "fatura", titulo: "Fatura " + ct.nome, empresa: false, valor: total, data, atrasada: data < hoje });
+    }
+  });
+  return itens.sort((a, b) => (a.data || "").localeCompare(b.data || ""));
+}
+
+function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes, cartoes, comprasCartao, pagamentosFatura }) {
   const [refMes, setRefMes] = useState(monthKey(todayStr()));
+  const [contasPagarAberto, setContasPagarAberto] = useState(true);
 
   const recebidoDoMes = (mk) => financeiro
     .filter((f) => f.pago && monthKey(f.data) === mk)
@@ -2995,6 +3032,13 @@ function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes }) {
     </div>
   );
 
+  // Contas a pagar (próximos ~2 meses) — vencimentos de gastos, contas fixas e faturas
+  const contasPagar = montarContasAPagar(despesas, cartoes, comprasCartao, pagamentosFatura);
+  const totalPagar = contasPagar.reduce((s, i) => s + (i.valor || 0), 0);
+  const hojeStr2 = todayStr();
+  const diasAteVenc = (d) => Math.round((new Date(d) - new Date(hojeStr2)) / 86400000);
+  const iconePagar = { fixa: Repeat, gasto: Receipt, fatura: CreditCard };
+
   return (
     <div>
       <div className="rounded-lg p-2 mb-3 flex items-center justify-between" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
@@ -3022,6 +3066,47 @@ function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes }) {
         <Card titulo={margem != null ? `Resultado · margem ${margem}%` : "Resultado do mês"} valor={resultado}
               cor={COLORS.burgundy} Icon={Wallet} destaque
               variacao={variacaoPct(resultado, resultadoAnt)} mesAnterior={labelAnt} sobeEhBom />
+      </div>
+
+      <div className="rounded-lg mb-3 overflow-hidden" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
+        <button onClick={() => setContasPagarAberto((v) => !v)} className="w-full flex items-center gap-2 px-3 py-2.5">
+          <CalendarPlus size={15} color={COLORS.burgundy} />
+          <span className="text-sm font-semibold text-left" style={{ color: COLORS.ink }}>
+            Contas a pagar {contasPagar.length > 0 ? `· ${contasPagar.length} (${fmtMoney(totalPagar)})` : ""}
+          </span>
+          <span className="ml-auto">{contasPagarAberto ? <ChevronDown size={16} color={COLORS.inkSoft} /> : <ChevronRight size={16} color={COLORS.inkSoft} />}</span>
+        </button>
+        {contasPagarAberto && (
+          <div className="px-2 pb-2">
+            {contasPagar.length === 0 && (
+              <p className="text-xs py-3 text-center" style={{ color: COLORS.inkSoft }}>Nada a pagar nos próximos 2 meses. 🎉</p>
+            )}
+            <div className="space-y-1.5">
+              {contasPagar.map((c) => {
+                const dias = diasAteVenc(c.data);
+                const Ic = iconePagar[c.tipo] || Receipt;
+                const venc = c.atrasada ? `Atrasada · venceu há ${Math.abs(dias)} dia(s)`
+                          : dias === 0 ? "Vence hoje" : `Vence ${fmtDatePt(c.data)} · em ${dias} dia(s)`;
+                return (
+                  <div key={c.id} className="rounded-lg px-3 py-2 flex items-center gap-2" style={{ backgroundColor: "#F1F3F6" }}>
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                         style={{ backgroundColor: (c.atrasada ? COLORS.red : COLORS.burgundy) + "1A" }}>
+                      <Ic size={15} color={c.atrasada ? COLORS.red : COLORS.burgundy} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-semibold truncate flex items-center gap-1.5" style={{ color: COLORS.ink }}>
+                        {c.titulo}
+                        {c.empresa && <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ backgroundColor: COLORS.slate + "22", color: COLORS.slate }}>EMPRESA</span>}
+                      </div>
+                      <div className="text-[11px]" style={{ color: c.atrasada ? COLORS.red : COLORS.inkSoft }}>{venc}</div>
+                    </div>
+                    <div className="text-xs font-bold flex-shrink-0" style={{ color: COLORS.red, fontFamily: "ui-monospace, monospace" }}>− {fmtMoney(c.valor)}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="mb-3">
@@ -3074,7 +3159,8 @@ function FinanceView({ financeiro, onAddFinanceiro, onEditFinanceiro, onDeleteFi
 
       {subTab === "visao" && (
         <VisaoGeralFinanceiro financeiro={financeiro} despesas={despesas}
-                              contas={contas} movimentacoes={movimentacoes} />
+                              contas={contas} movimentacoes={movimentacoes}
+                              cartoes={cartoes} comprasCartao={comprasCartao} pagamentosFatura={pagamentosFatura} />
       )}
 
       {subTab === "negocio" && (
