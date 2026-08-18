@@ -2975,9 +2975,50 @@ function montarContasAPagar(despesas, cartoes, comprasCartao, pagamentosFatura) 
   return itens.sort((a, b) => (a.data || "").localeCompare(b.data || ""));
 }
 
+// Projeção de fluxo de caixa: para cada mês à frente, entradas previstas (a receber) menos
+// saídas previstas (contas fixas, gastos e faturas), acumulando sobre o saldo atual.
+function projecaoFluxoCaixa(financeiro, despesas, cartoes, comprasCartao, pagamentosFatura, saldoInicial, nMeses) {
+  const hoje = todayStr();
+  const inicioMk = monthKey(hoje);
+  const meses = [];
+  let saldo = saldoInicial || 0;
+  for (let i = 0; i < (nMeses || 6); i++) {
+    const mk = addMonths(inicioMk, i);
+    const entradas = (financeiro || []).filter((f) => !f.pago && monthKey(f.data) === mk && (f.data || "") >= hoje)
+      .reduce((s, f) => s + (f.valorPago || 0), 0);
+    let saidas = 0;
+    (despesas || []).forEach((d) => {
+      const recorrente = d.tipo === "fixa" || d.tipo === "negocio_fixa";
+      if (recorrente) {
+        const dia = (d.data || "").slice(8, 10) || "01";
+        const oc = mk + "-" + dia;
+        if (oc < hoje) return;
+        if (d.pago && mk === inicioMk) return;
+        if (monthKey(d.data) <= mk) saidas += d.valor || 0;
+      } else {
+        if (d.pago || !d.data) return;
+        if (monthKey(d.data) === mk && (d.data || "") >= hoje) saidas += d.valor || 0;
+      }
+    });
+    (cartoes || []).forEach((ct) => {
+      const total = (comprasCartao || []).filter((c) => c.cartaoId === ct.id)
+        .reduce((s, c) => { const p = parcelaInfo(c, mk); return p ? s + c.valorParcela : s; }, 0);
+      if (total <= 0) return;
+      if ((pagamentosFatura || []).some((p) => p.cartaoId === ct.id && p.mes === mk)) return;
+      const dia = ct.diaVencimento ? String(ct.diaVencimento).padStart(2, "0") : "10";
+      if (mk + "-" + dia < hoje) return;
+      saidas += total;
+    });
+    saldo = saldo + entradas - saidas;
+    meses.push({ mes: mk, entradas: entradas, saidas: saidas, saldo: saldo });
+  }
+  return meses;
+}
+
 function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes, cartoes, comprasCartao, pagamentosFatura }) {
   const [refMes, setRefMes] = useState(monthKey(todayStr()));
   const [contasPagarAberto, setContasPagarAberto] = useState(true);
+  const [fluxoAberto, setFluxoAberto] = useState(true);
 
   const recebidoDoMes = (mk) => financeiro
     .filter((f) => f.pago && monthKey(f.data) === mk)
@@ -4039,10 +4080,23 @@ function App() {
     }
     catch (e) { console.error(e); setErro("Não foi possível atualizar o status."); }
   };
-  const deleteAtendimento = async (id) => {
+  const deleteAtendimento = async (id, jaConfirmado) => {
+    const finLig = financeiro.filter((f) => f.atendimentoId === id);
+    const cliLig = clientes.filter((c) => c.atendimentoId === id);
+    const agLig = agendamentos.filter((a) => a.atendimentoId === id);
+    if (!jaConfirmado && (finLig.length || cliLig.length)) {
+      if (!window.confirm(`Excluir este atendimento também remove ${finLig.length} lançamento(s) do financeiro e o cliente vinculado. Continuar?`)) return;
+    }
     setAtendimentos((prev) => prev.filter((a) => a.id !== id));
-    try { await apiDelete(`/api/atendimentos/${id}`); }
-    catch (e) { console.error(e); setErro("Não foi possível excluir."); }
+    setFinanceiro((prev) => prev.filter((f) => f.atendimentoId !== id));
+    setClientes((prev) => prev.filter((c) => c.atendimentoId !== id));
+    setAgendamentos((prev) => prev.filter((a) => a.atendimentoId !== id));
+    try {
+      await apiDelete(`/api/atendimentos/${id}`);
+      for (const f of finLig) await apiDelete(`/api/financeiro/${f.id}`);
+      for (const c of cliLig) await apiDelete(`/api/clientes/${c.id}`);
+      for (const a of agLig) await apiDelete(`/api/agendamentos/${a.id}`);
+    } catch (e) { console.error(e); setErro("Não foi possível excluir tudo. Recarregue e confira."); }
   };
   const addAgendamento = async (item) => {
     setAgendamentos((prev) => [...prev, item]);
@@ -4075,6 +4129,15 @@ function App() {
   };
   const deleteFinanceiro = async (id) => {
     const alvo = financeiro.find((f) => f.id === id);
+    // Se está ligado a um atendimento existente, excluir remove o atendimento inteiro (tudo ligado)
+    if (alvo && alvo.atendimentoId) {
+      const at = atendimentos.find((a) => a.id === alvo.atendimentoId);
+      if (at) {
+        if (!window.confirm(`Este recebimento é do atendimento de "${at.cliente}". Excluir vai remover também o atendimento (e os lançamentos dele). Continuar?`)) return;
+        await deleteAtendimento(alvo.atendimentoId, true);
+        return;
+      }
+    }
     const nextFin = financeiro.filter((f) => f.id !== id);
     setFinanceiro(nextFin);
     try { await apiDelete(`/api/financeiro/${id}`); }
