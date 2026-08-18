@@ -3973,21 +3973,43 @@ function App() {
     try { await apiPost("/api/financeiro", item); }
     catch (e) { console.error(e); setErro("Não foi possível salvar o lançamento."); }
   };
+  // Mantém o atendimento em sincronia com seus lançamentos no financeiro.
+  // Se todos os lançamentos daquele atendimento estão pagos, o atendimento vira "pago"; senão "pendente".
+  const sincronizarPagamentoAtendimento = async (atId, finList) => {
+    if (!atId) return;
+    const lista = finList || financeiro;
+    const doAt = lista.filter((f) => f.atendimentoId === atId);
+    if (doAt.length === 0) return;
+    const novoPag = doAt.every((f) => f.pago) ? "pago" : "pendente";
+    const at = atendimentos.find((a) => a.id === atId);
+    if (!at || (at.pagamento || "") === novoPag) return;
+    setAtendimentos((prev) => prev.map((a) => (a.id === atId ? { ...a, pagamento: novoPag } : a)));
+    try { await apiPatch(`/api/atendimentos/${atId}`, { pagamento: novoPag }); }
+    catch (e) { console.error(e); }
+  };
   const deleteFinanceiro = async (id) => {
-    setFinanceiro((prev) => prev.filter((f) => f.id !== id));
+    const alvo = financeiro.find((f) => f.id === id);
+    const nextFin = financeiro.filter((f) => f.id !== id);
+    setFinanceiro(nextFin);
     try { await apiDelete(`/api/financeiro/${id}`); }
     catch (e) { console.error(e); setErro("Não foi possível excluir."); }
+    if (alvo && alvo.atendimentoId) await sincronizarPagamentoAtendimento(alvo.atendimentoId, nextFin);
   };
   const marcarPago = async (id) => {
     const hoje = todayStr();
-    setFinanceiro((prev) => prev.map((f) => (f.id === id ? { ...f, pago: true, data: hoje } : f)));
+    const alvo = financeiro.find((f) => f.id === id);
+    const nextFin = financeiro.map((f) => (f.id === id ? { ...f, pago: true, data: hoje } : f));
+    setFinanceiro(nextFin);
     try { await apiPatch(`/api/financeiro/${id}`, { pago: true, data: hoje }); }
     catch (e) { console.error(e); setErro("Não foi possível atualizar o pagamento."); }
+    if (alvo && alvo.atendimentoId) await sincronizarPagamentoAtendimento(alvo.atendimentoId, nextFin);
   };
   const editFinanceiro = async (item) => {
-    setFinanceiro((prev) => prev.map((f) => (f.id === item.id ? item : f)));
+    const nextFin = financeiro.map((f) => (f.id === item.id ? item : f));
+    setFinanceiro(nextFin);
     try { await apiPatch(`/api/financeiro/${item.id}`, item); }
     catch (e) { console.error(e); setErro("Não foi possível salvar as alterações."); }
+    if (item.atendimentoId) await sincronizarPagamentoAtendimento(item.atendimentoId, nextFin);
   };
   const addDespesa = async (item) => {
     setDespesas((prev) => [item, ...prev]);
