@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cotação de Seguro · Inove</title>
+<style>
+  :root{
+    --navy:#001C4E; --gold:#C9A227; --goldDeep:#96791C;
+    --ink:#101B33; --inkSoft:#5B6478; --line:#E2E5EC; --bg:#F7F8FA;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  .wrap{display:flex;gap:20px;align-items:flex-start;padding:20px;max-width:1300px;margin:0 auto}
+
+  /* ---------- FORMULÁRIO ---------- */
+  .form{flex:0 0 360px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px;
+        position:sticky;top:20px;max-height:calc(100vh - 40px);overflow-y:auto}
+  .form h2{margin:0 0 4px;font-size:16px}
+  .form .sub{margin:0 0 14px;font-size:12px;color:var(--inkSoft)}
+  fieldset{border:1px solid var(--line);border-radius:12px;padding:12px;margin:0 0 12px}
+  legend{font-size:11px;font-weight:700;color:var(--navy);padding:0 6px;text-transform:uppercase;letter-spacing:.4px}
+  label{display:block;font-size:11px;font-weight:600;color:var(--inkSoft);margin:8px 0 3px}
+  input,select{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;
+        font-size:13px;font-family:inherit;color:var(--ink);background:#fff}
+  input:focus,select:focus{outline:2px solid var(--navy);outline-offset:-1px}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+  .btns{display:flex;gap:8px;position:sticky;bottom:0;background:#fff;padding-top:10px}
+  .btn{flex:1;padding:11px;border:0;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer}
+  .btn-main{background:var(--navy);color:#fff}
+  .btn-ghost{background:#F2ECE2;color:var(--goldDeep)}
+  .hint{font-size:11px;color:var(--inkSoft);margin-top:10px;line-height:1.5}
+  .chk{display:flex;align-items:center;gap:7px;margin-top:8px}
+  .chk input{width:auto}
+  .chk label{margin:0;font-size:12px;color:var(--ink)}
+  .formas{display:flex;gap:12px;flex-wrap:wrap;margin-top:4px}
+  .formas .chk{margin-top:4px}
+  .calc{background:#F2ECE2;border-radius:8px;padding:7px 10px;margin-top:8px;font-size:12px;color:var(--goldDeep);font-weight:600}
+  .opTit{font-size:11px;font-weight:800;color:var(--navy);text-transform:uppercase;letter-spacing:.4px;margin:2px 0 6px}
+
+  /* linhas de cobertura no formulário */
+  .cobHead,.cobRow{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:6px;align-items:center}
+  .cobHead{margin-bottom:5px}
+  .cobHead span{font-size:10px;font-weight:700;color:var(--inkSoft);text-transform:uppercase;letter-spacing:.3px}
+  .cobRow{margin-bottom:6px}
+  .cobRow input{padding:7px 8px;font-size:12px}
+  .cobRow input.nome{font-weight:600;color:var(--ink)}
+
+  /* ---------- A PÁGINA (vira o PDF) ---------- */
+  .paper{flex:1;background:#fff;border-radius:16px;box-shadow:0 2px 14px rgba(16,27,51,.08);
+         padding:38px 42px;min-width:620px}
+  .topo{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;
+        border-bottom:3px solid var(--navy);padding-bottom:14px;margin-bottom:22px}
+  .marca .nome{font-size:29px;font-weight:800;color:var(--navy);letter-spacing:.5px;line-height:1}
+  .marca .tag{font-size:10.5px;color:var(--inkSoft);margin-top:5px;letter-spacing:.3px}
+  .topo .doc{text-align:right}
+  .topo .doc .t{font-size:13px;font-weight:800;color:var(--navy);text-transform:uppercase;letter-spacing:.6px}
+  .topo .doc .d{font-size:11px;color:var(--inkSoft);margin-top:3px}
+
+  .bloco{border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:22px;background:#FCFCFD}
+  .bloco .bt{font-size:11px;font-weight:800;color:var(--goldDeep);text-transform:uppercase;
+             letter-spacing:.6px;margin-bottom:10px}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .campo .k{font-size:10px;color:var(--inkSoft);text-transform:uppercase;letter-spacing:.3px}
+  .campo .v{font-size:13.5px;font-weight:700;margin-top:2px}
+
+  table{width:100%;border-collapse:collapse;margin-bottom:22px}
+  th,td{padding:9px 12px;font-size:12.5px;text-align:left;border-bottom:1px solid var(--line);vertical-align:middle}
+  thead th{background:var(--navy);color:#fff;font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:0}
+  thead th:first-child{border-radius:8px 0 0 0}
+  thead th:last-child{border-radius:0 8px 0 0}
+  th.col{text-align:center;width:29%}
+  td.col{text-align:center;font-weight:600}
+  td.item{color:var(--inkSoft);font-weight:600;width:42%}
+  tbody tr:nth-child(even){background:#FAFBFC}
+  .selo{display:inline-block;background:var(--gold);color:#3A2E06;font-size:9px;font-weight:800;
+        padding:2px 7px;border-radius:20px;margin-left:6px;letter-spacing:.4px;vertical-align:middle}
+  .segNome{font-size:13.5px;font-weight:800;letter-spacing:.2px}
+
+  .precos{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .preco{border:2px solid var(--line);border-radius:14px;padding:18px;text-align:center}
+  .preco.dest{border-color:var(--gold);background:#FEFBF0}
+  .preco .s{font-size:13px;font-weight:800;color:var(--navy);margin-bottom:8px}
+  .preco .lab{font-size:10px;color:var(--inkSoft);text-transform:uppercase;letter-spacing:.5px}
+  .preco .val{font-size:30px;font-weight:800;color:var(--navy);letter-spacing:-.6px;line-height:1.2;margin-top:2px}
+  .preco .par{font-size:14px;color:var(--ink);margin-top:9px;font-weight:700}
+  .preco .jur{font-size:11px;color:var(--inkSoft);margin-top:2px}
+  .preco .fp{font-size:11px;color:var(--inkSoft);margin-top:9px;padding-top:9px;border-top:1px dashed var(--line);line-height:1.5}
+
+  .aviso{font-size:9.5px;color:var(--inkSoft);text-align:center;line-height:1.5;
+         margin-top:26px;padding-top:14px;border-top:1px solid var(--line)}
+
+  /* ---------- IMPRESSÃO / PDF ---------- */
+  @page{size:A4;margin:14mm}
+  @media print{
+    body{background:#fff}
+    .wrap{display:block;padding:0;max-width:none}
+    .form{display:none !important}
+    .paper{box-shadow:none;border-radius:0;padding:0;min-width:0;width:100%}
+    tr,.preco,.bloco{break-inside:avoid}
+    *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  }
+  @media(max-width:1050px){
+    .wrap{flex-direction:column}
+    .form{position:static;flex:1 1 auto;width:100%;max-height:none}
+    .paper{min-width:0;width:100%;padding:22px}
+    .grid{grid-template-columns:repeat(2,1fr)}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ============ FORMULÁRIO ============ -->
+  <div class="form">
+    <h2>Cotação de Seguro</h2>
+    <p class="sub">Escolha o ramo e preencha — a página ao lado se monta sozinha.</p>
+
+    <fieldset>
+      <legend>Ramo do seguro</legend>
+      <select id="ramo">
+        <option value="auto">Auto</option>
+        <option value="vida">Vida</option>
+        <option value="residencial">Residencial</option>
+        <option value="bike">Bike</option>
+        <option value="celular">Celular</option>
+        <option value="outros">Outros</option>
+      </select>
+      <input id="outrosNome" placeholder="Qual seguro? Ex: Seguro Empresarial, Pet, Viagem..." style="display:none;margin-top:6px">
+    </fieldset>
+
+    <fieldset>
+      <legend id="legDados">Dados</legend>
+      <div id="dadosCampos"></div>
+      <div class="row2">
+        <div><label>Início da vigência</label><input id="vigIni" type="date"></div>
+        <div><label>Fim da vigência</label><input id="vigFim" type="date"></div>
+      </div>
+      <label>Data da cotação</label>
+      <input id="propData" type="date">
+    </fieldset>
+
+    <fieldset>
+      <legend>Seguradoras</legend>
+      <label>Opção 1</label>
+      <select id="s1" class="seg"></select>
+      <input id="outra1" placeholder="Nome da seguradora" style="display:none;margin-top:6px">
+      <label>Opção 2</label>
+      <select id="s2" class="seg"></select>
+      <input id="outra2" placeholder="Nome da seguradora" style="display:none;margin-top:6px">
+    </fieldset>
+
+    <fieldset>
+      <legend>Coberturas</legend>
+      <div class="cobHead"><span>Cobertura</span><span>Opção 1</span><span>Opção 2</span></div>
+      <div id="cobRows"></div>
+      <p class="hint" style="margin-top:2px">Deixe uma linha em branco (sem nome) para não aparecer no PDF.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Valores — Opção 1</legend>
+      <div class="row2">
+        <div><label>Valor total (R$)</label><input id="pre1" placeholder="2.400,00"></div>
+        <div><label>Nº de parcelas</label><input id="npar1" type="number" min="1" max="24" placeholder="10"></div>
+      </div>
+      <label>Valor da parcela (R$) — só se tiver juros</label>
+      <input id="vpar1" placeholder="deixe vazio para calcular sozinho">
+      <div class="calc" id="calc1">Preencha o valor total e o nº de parcelas</div>
+      <label>Formas de pagamento</label>
+      <div class="formas">
+        <div class="chk"><input type="checkbox" id="fc1"><label for="fc1">Cartão</label></div>
+        <div class="chk"><input type="checkbox" id="fb1"><label for="fb1">Boleto</label></div>
+        <div class="chk"><input type="checkbox" id="fd1"><label for="fd1">Débito em conta</label></div>
+      </div>
+      <div class="chk" style="margin-top:10px"><input type="checkbox" id="rec1"><label for="rec1">Marcar como recomendada</label></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Valores — Opção 2</legend>
+      <div class="row2">
+        <div><label>Valor total (R$)</label><input id="pre2" placeholder="2.850,00"></div>
+        <div><label>Nº de parcelas</label><input id="npar2" type="number" min="1" max="24" placeholder="12"></div>
+      </div>
+      <label>Valor da parcela (R$) — só se tiver juros</label>
+      <input id="vpar2" placeholder="deixe vazio para calcular sozinho">
+      <div class="calc" id="calc2">Preencha o valor total e o nº de parcelas</div>
+      <label>Formas de pagamento</label>
+      <div class="formas">
+        <div class="chk"><input type="checkbox" id="fc2"><label for="fc2">Cartão</label></div>
+        <div class="chk"><input type="checkbox" id="fb2"><label for="fb2">Boleto</label></div>
+        <div class="chk"><input type="checkbox" id="fd2"><label for="fd2">Débito em conta</label></div>
+      </div>
+      <div class="chk" style="margin-top:10px"><input type="checkbox" id="rec2"><label for="rec2">Marcar como recomendada</label></div>
+    </fieldset>
+
+    <div class="btns">
+      <button class="btn btn-main" onclick="window.print()">Gerar PDF</button>
+      <button class="btn btn-ghost" onclick="limpar()">Limpar</button>
+    </div>
+    <p class="hint"><strong>Enviar no WhatsApp:</strong> clique em <em>Gerar PDF</em> → em "Destino" escolha
+    <strong>Salvar como PDF</strong> → anexe o arquivo na conversa.</p>
+  </div>
+
+  <!-- ============ A PÁGINA ============ -->
+  <div class="paper" id="paper">
+    <div class="topo">
+      <div class="marca">
+        <div class="nome">INOVE</div>
+        <div class="tag">SEGUROS E SOLUÇÕES FINANCEIRAS · CERTIFICAÇÃO DIGITAL</div>
+      </div>
+      <div class="doc">
+        <div class="t" id="oTitulo">Cotação de Seguro</div>
+        <div class="d" id="oData">—</div>
+      </div>
+    </div>
+
+    <div class="bloco">
+      <div class="bt" id="oBtDados">Dados</div>
+      <div class="grid" id="oDados"></div>
+      <div class="grid" style="margin-top:12px">
+        <div class="campo" style="grid-column:span 2"><div class="k">Vigência</div><div class="v" id="oVig">—</div></div>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Coberturas</th>
+          <th class="col"><span class="segNome" id="oS1">Opção 1</span><span class="selo" id="oR1" style="display:none">RECOMENDADA</span></th>
+          <th class="col"><span class="segNome" id="oS2">Opção 2</span><span class="selo" id="oR2" style="display:none">RECOMENDADA</span></th>
+        </tr>
+      </thead>
+      <tbody id="oCob"></tbody>
+    </table>
+
+    <div class="precos">
+      <div class="preco" id="oBox1">
+        <div class="s" id="oPs1">Opção 1</div>
+        <div class="lab">Valor total</div>
+        <div class="val" id="oPre1">—</div>
+        <div class="par" id="oPar1"></div>
+        <div class="jur" id="oJur1"></div>
+        <div class="fp" id="oFp1" style="display:none"></div>
+      </div>
+      <div class="preco" id="oBox2">
+        <div class="s" id="oPs2">Opção 2</div>
+        <div class="lab">Valor total</div>
+        <div class="val" id="oPre2">—</div>
+        <div class="par" id="oPar2"></div>
+        <div class="jur" id="oJur2"></div>
+        <div class="fp" id="oFp2" style="display:none"></div>
+      </div>
+    </div>
+
+    <div class="aviso">Proposta sujeita à análise e aceitação da seguradora. Coberturas, limites e condições
+    conforme as cláusulas contratuais da apólice.</div>
+  </div>
+</div>
+
+<script>
+var SEGURADORAS = ["Porto Seguro","Azul Seguros","Itaú Seguros","Bradesco Seguros","SulAmérica","Allianz",
+  "Tokio Marine","HDI Seguros","Mapfre","Zurich","Aliro (ex-Liberty)","Sompo Seguros","Suhai","Youse",
+  "Generali","Chubb","Alfa Seguros","Pottencial","Akad","Sancor","Ezze Seguros"];
+
+// Cada ramo define: título, os campos de "dados" e as coberturas padrão (editáveis)
+var RAMOS = {
+  auto: {
+    titulo: "Seguro Auto", btDados: "Dados do veículo",
+    dados: [
+      {k:"modelo", label:"Marca e modelo", ph:"Ex: Honda Civic EXL 2.0"},
+      {k:"ano", label:"Ano", ph:"2022/2023"},
+      {k:"placa", label:"Placa", ph:"ABC1D23", upper:true},
+      {k:"uso", label:"Uso", ph:"Particular"}
+    ],
+    cob: ["Tipo de cobertura","Valor segurado (casco)","Franquia","Danos materiais a terceiros",
+          "Danos corporais a terceiros","Danos morais","Acidentes pessoais (morte/invalidez)",
+          "Assistência 24 horas","Carro reserva","Vidros"]
+  },
+  vida: {
+    titulo: "Seguro de Vida", btDados: "Dados do segurado",
+    dados: [
+      {k:"segurado", label:"Segurado", ph:"Nome"},
+      {k:"idade", label:"Idade", ph:"Ex: 38"},
+      {k:"prof", label:"Profissão", ph:""},
+      {k:"cap", label:"Capital segurado (R$)", ph:"200.000,00"}
+    ],
+    cob: ["Morte (qualquer causa)","Morte acidental","Invalidez permanente por acidente (IPA)",
+          "Invalidez por doença","Doenças graves","Diária de incapacidade temporária",
+          "Assistência funeral","Assistência 24h"]
+  },
+  residencial: {
+    titulo: "Seguro Residencial", btDados: "Dados do imóvel",
+    dados: [
+      {k:"end", label:"Endereço", ph:"Rua, nº, bairro"},
+      {k:"tipo", label:"Tipo de imóvel", ph:"Casa / Apartamento"},
+      {k:"uso", label:"Uso", ph:"Habitual / Veraneio"},
+      {k:"valor", label:"Valor em risco (R$)", ph:""}
+    ],
+    cob: ["Incêndio, raio e explosão","Danos elétricos","Roubo e furto de bens","Vendaval / granizo",
+          "Responsabilidade civil familiar","Perda ou pagamento de aluguel","Vazamento de tubulação",
+          "Assistência 24h (chaveiro, encanador...)"]
+  },
+  bike: {
+    titulo: "Seguro Bike", btDados: "Dados da bicicleta",
+    dados: [
+      {k:"modelo", label:"Marca e modelo", ph:"Ex: Caloi Elite"},
+      {k:"valor", label:"Valor da bike (R$)", ph:""},
+      {k:"serie", label:"Nº de série", ph:""},
+      {k:"uso", label:"Uso", ph:"Lazer / Competição"}
+    ],
+    cob: ["Roubo e furto qualificado","Furto simples","Danos por acidente / colisão",
+          "Responsabilidade civil a terceiros","Acidentes pessoais (APP)","Cobertura em competições",
+          "Assistência / transporte da bike"]
+  },
+  celular: {
+    titulo: "Seguro de Celular", btDados: "Dados do aparelho",
+    dados: [
+      {k:"aparelho", label:"Aparelho", ph:"Ex: iPhone 14 128GB"},
+      {k:"imei", label:"IMEI", ph:""},
+      {k:"valor", label:"Valor do aparelho (R$)", ph:""},
+      {k:"uso", label:"Uso", ph:"Pessoal"}
+    ],
+    cob: ["Roubo e furto qualificado","Furto simples","Danos por acidente (quebra de tela)",
+          "Danos por líquidos / oxidação","Uso indevido após roubo","Reposição / indenização",
+          "Assistência técnica"]
+  },
+  outros: {
+    titulo: "Seguro", btDados: "Dados do bem / segurado",
+    dados: [
+      {k:"item", label:"Item segurado", ph:""},
+      {k:"detalhe", label:"Detalhe", ph:""},
+      {k:"valor", label:"Valor (R$)", ph:""},
+      {k:"uso", label:"Observação", ph:""}
+    ],
+    cob: ["Cobertura 1","Cobertura 2","Cobertura 3","Cobertura 4","Assistência"]
+  }
+};
+
+var NLINHAS = 12; // linhas de cobertura disponíveis no formulário
+var ramoAtual = "auto";
+
+function el(id){return document.getElementById(id)}
+function existe(id){return !!el(id)}
+function val(id){var e=el(id);if(!e)return "";return e.type==="checkbox"?e.checked:(e.value||"")}
+function num(v){
+  if(v===null||v===undefined||v==="") return 0;
+  var s = String(v).replace(/[^\d,.-]/g,"");
+  if(s.indexOf(",")>-1) s = s.replace(/\./g,"").replace(",",".");
+  var n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+function fmt(n){ return "R$ " + Number(n).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function dinheiro(v){ if(!v) return ""; var n = num(v); return n ? fmt(n) : String(v); }
+function dataPt(v){ if(!v) return ""; var p = v.split("-"); return p.length===3 ? p[2]+"/"+p[1]+"/"+p[0] : v; }
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function nomeSeguradora(i){ var s = val("s"+i); return s === "__outra__" ? (val("outra"+i) || "Outra seguradora") : s; }
+function formasDe(i){ var f=[]; if(val("fc"+i))f.push("Cartão de crédito"); if(val("fb"+i))f.push("Boleto"); if(val("fd"+i))f.push("Débito em conta"); return f; }
+
+// Monta os selects de seguradora
+document.querySelectorAll("select.seg").forEach(function(sel,i){
+  sel.innerHTML = SEGURADORAS.map(function(s){return '<option>'+esc(s)+'</option>'}).join("")
+                + '<option value="__outra__">Outra (digitar)</option>';
+  sel.selectedIndex = i === 0 ? 0 : 1;
+});
+
+// Constrói os campos de "dados" (formulário) e o grid de saída conforme o ramo
+function montarDados(){
+  var r = RAMOS[ramoAtual];
+  el("legDados").textContent = r.btDados;
+  el("oBtDados").textContent = r.btDados;
+  el("dadosCampos").innerHTML = r.dados.map(function(c){
+    return '<label>'+esc(c.label)+'</label>'
+         + '<input id="d_'+c.k+'" data-dado="1" placeholder="'+esc(c.ph||"")+'">';
+  }).join("");
+  el("oDados").innerHTML = r.dados.map(function(c){
+    return '<div class="campo"><div class="k">'+esc(c.label.replace(/ \(R\$\)/,""))+'</div><div class="v" id="od_'+c.k+'">—</div></div>';
+  }).join("");
+}
+
+// Constrói as linhas de cobertura (formulário)
+function montarCobRows(){
+  var html = "";
+  for(var i=0;i<NLINHAS;i++){
+    html += '<div class="cobRow">'
+          + '<input class="nome" id="cn_'+i+'" placeholder="Cobertura">'
+          + '<input id="c1_'+i+'" placeholder="Opção 1">'
+          + '<input id="c2_'+i+'" placeholder="Opção 2">'
+          + '</div>';
+  }
+  el("cobRows").innerHTML = html;
+}
+
+// Preenche os nomes de cobertura padrão do ramo (e limpa o resto)
+function preencherCobPadrao(){
+  var lista = RAMOS[ramoAtual].cob;
+  for(var i=0;i<NLINHAS;i++){
+    el("cn_"+i).value = lista[i] || "";
+    el("c1_"+i).value = "";
+    el("c2_"+i).value = "";
+  }
+}
+
+function chaveRamo(){ return "cotacaoRamo_" + ramoAtual; }
+
+function coletar(){
+  var d = {};
+  document.querySelectorAll(".form input, .form select").forEach(function(e){
+    if(!e.id) return;
+    d[e.id] = e.type==="checkbox" ? e.checked : e.value;
+  });
+  return d;
+}
+function salvar(){
+  try{ localStorage.setItem(chaveRamo(), JSON.stringify(coletar())); localStorage.setItem("cotacaoRamoAtual", ramoAtual); }catch(e){}
+}
+function aplicar(d){
+  Object.keys(d||{}).forEach(function(id){
+    var e = el(id); if(!e) return;
+    if(e.type==="checkbox") e.checked = !!d[id]; else e.value = d[id];
+  });
+}
+
+// Troca de ramo: salva o atual, monta o novo e carrega o que estiver salvo (ou os padrões)
+function trocarRamo(novo, primeira){
+  if(!primeira) salvar();
+  ramoAtual = novo;
+  el("ramo").value = novo;
+  montarDados();
+  montarCobRows();
+  var salvo = null;
+  try{ salvo = JSON.parse(localStorage.getItem(chaveRamo()) || "null"); }catch(e){}
+  if(salvo){ aplicar(salvo); } else { preencherCobPadrao(); }
+  if(!val("propData")) el("propData").value = new Date().toISOString().slice(0,10);
+  render();
+}
+
+function render(){
+  var r = RAMOS[ramoAtual];
+  el("outrosNome").style.display = ramoAtual === "outros" ? "block" : "none";
+  var titulo = r.titulo;
+  if(ramoAtual === "outros"){ var cn = val("outrosNome"); if(cn && String(cn).trim()) titulo = String(cn).trim(); }
+  el("oTitulo").textContent = "Cotação de " + titulo;
+  el("oData").textContent = dataPt(val("propData")) || "—";
+
+  // dados
+  r.dados.forEach(function(c){
+    var v = val("d_"+c.k);
+    if(c.upper) v = (v||"").toUpperCase();
+    var out = el("od_"+c.k);
+    if(out) out.textContent = v && String(v).trim() ? v : "—";
+  });
+  var vi = dataPt(val("vigIni")), vf = dataPt(val("vigFim"));
+  el("oVig").textContent = vi && vf ? (vi + "  até  " + vf) : (vi || vf || "—");
+
+  // coberturas (tabela dinâmica — só linhas com nome preenchido)
+  var linhas = "";
+  for(var i=0;i<NLINHAS;i++){
+    var nome = val("cn_"+i);
+    if(!nome || !String(nome).trim()) continue;
+    linhas += '<tr><td class="item">'+esc(nome)+'</td>'
+            + '<td class="col">'+esc(dinheiro(val("c1_"+i))||"—")+'</td>'
+            + '<td class="col">'+esc(dinheiro(val("c2_"+i))||"—")+'</td></tr>';
+  }
+  el("oCob").innerHTML = linhas || '<tr><td class="item">—</td><td class="col">—</td><td class="col">—</td></tr>';
+
+  [1,2].forEach(function(i){
+    el("outra"+i).style.display = val("s"+i) === "__outra__" ? "block" : "none";
+    var nome = nomeSeguradora(i);
+    el("oS"+i).textContent = nome;
+    el("oPs"+i).textContent = nome;
+    el("oPre"+i).textContent = dinheiro(val("pre"+i)) || "—";
+
+    // parcelamento
+    var total = num(val("pre"+i));
+    var n = parseInt(val("npar"+i), 10) || 0;
+    var digitada = num(val("vpar"+i));
+    var parcela = digitada > 0 ? digitada : (n > 0 ? total / n : 0);
+    var totalParc = parcela * n;
+    var comJuros = digitada > 0 && n > 0 && Math.abs(totalParc - total) > 0.05;
+
+    var linha = "", jur = "", aviso = "";
+    if(n === 1){ linha = "À vista"; }
+    else if(n > 1 && parcela > 0){ linha = n + "x de " + fmt(parcela); jur = comJuros ? "com juros · total parcelado " + fmt(totalParc) : "sem juros"; }
+    el("oPar"+i).textContent = linha;
+    el("oJur"+i).textContent = jur;
+
+    if(n > 1 && parcela > 0){ aviso = digitada > 0 ? (comJuros ? "Parcela digitada (com juros)" : "Parcela digitada") : "Calculado: " + n + "x de " + fmt(parcela) + " sem juros"; }
+    else if(total > 0 && !n){ aviso = "Informe o nº de parcelas"; }
+    else { aviso = "Preencha o valor total e o nº de parcelas"; }
+    el("calc"+i).textContent = aviso;
+
+    var f = formasDe(i);
+    el("oFp"+i).style.display = f.length ? "block" : "none";
+    el("oFp"+i).textContent = f.join("  ·  ");
+
+    var rec = val("rec"+i);
+    el("oR"+i).style.display = rec ? "inline-block" : "none";
+    el("oBox"+i).className = "preco" + (rec ? " dest" : "");
+  });
+
+  salvar();
+}
+
+function limpar(){
+  if(!confirm("Limpar esta cotação de " + RAMOS[ramoAtual].titulo + "?")) return;
+  try{ localStorage.removeItem(chaveRamo()); }catch(e){}
+  el("outrosNome").value="";
+  el("vigIni").value=""; el("vigFim").value="";
+  ["1","2"].forEach(function(i){
+    el("s"+i).selectedIndex = i==="2" ? 1 : 0; el("outra"+i).value="";
+    el("pre"+i).value=""; el("npar"+i).value=""; el("vpar"+i).value="";
+    el("fc"+i).checked=false; el("fb"+i).checked=false; el("fd"+i).checked=false; el("rec"+i).checked=false;
+  });
+  montarDados(); preencherCobPadrao();
+  el("propData").value = new Date().toISOString().slice(0,10);
+  render();
+}
+
+// Eventos (delegação — pega inclusive os campos criados dinamicamente)
+document.querySelector(".form").addEventListener("input", render);
+document.querySelector(".form").addEventListener("change", render);
+el("ramo").addEventListener("change", function(){ trocarRamo(this.value); });
+
+// Início
+var ultimo = localStorage.getItem("cotacaoRamoAtual");
+trocarRamo(RAMOS[ultimo] ? ultimo : "auto", true);
+</script>
+</body>
+</html>

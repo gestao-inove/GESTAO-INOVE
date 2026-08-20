@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Certificados · Validade · Inove</title>
+<style>
+  :root{
+    --navy:#001C4E; --gold:#C9A227; --goldDeep:#96791C;
+    --ink:#101B33; --inkSoft:#5B6478; --line:#E2E5EC; --bg:#F7F8FA;
+    --red:#B0413E; --amber:#C9A227; --green:#3E7D4F;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  .paper{max-width:900px;margin:20px auto;background:#fff;border-radius:16px;
+         box-shadow:0 2px 14px rgba(16,27,51,.08);padding:34px 38px}
+
+  .topo{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;
+        border-bottom:3px solid var(--navy);padding-bottom:14px;margin-bottom:18px}
+  .marca .nome{font-size:28px;font-weight:800;color:var(--navy);letter-spacing:.5px;line-height:1}
+  .marca .tag{font-size:10.5px;color:var(--inkSoft);margin-top:5px;letter-spacing:.3px}
+  .topo .doc{text-align:right}
+  .topo .doc .t{font-size:13px;font-weight:800;color:var(--navy);text-transform:uppercase;letter-spacing:.6px}
+  .topo .doc .d{font-size:11px;color:var(--inkSoft);margin-top:3px}
+
+  .clienteRow{display:flex;align-items:center;gap:8px;margin-bottom:18px}
+  .clienteRow label{font-size:12px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.4px}
+  .clienteRow input{flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;font-family:inherit;color:var(--ink)}
+
+  h3.sec{font-size:12px;font-weight:800;color:var(--goldDeep);text-transform:uppercase;
+         letter-spacing:.6px;margin:20px 0 8px}
+
+  table{width:100%;border-collapse:collapse;margin-bottom:6px}
+  th,td{padding:0;text-align:left;border-bottom:1px solid var(--line);vertical-align:middle}
+  thead th{background:var(--navy);color:#fff;font-size:11px;text-transform:uppercase;letter-spacing:.5px;
+           padding:9px 12px;border-bottom:0}
+  thead th:first-child{border-radius:8px 0 0 0}
+  thead th:last-child{border-radius:0 8px 0 0}
+  tbody tr:nth-child(even){background:#FAFBFC}
+  td input{width:100%;border:0;background:transparent;padding:9px 12px;font-size:13px;
+           font-family:inherit;color:var(--ink)}
+  td input:focus{outline:2px solid var(--navy);outline-offset:-2px;border-radius:6px;background:#fff}
+  td.col-val input{font-weight:700}
+  /* Cores automáticas de vencimento */
+  td.col-val.red{background:#FBEAEA}
+  td.col-val.red input{color:var(--red);font-weight:800}
+  td.col-val.amber{background:#FDF3DA}
+  td.col-val.amber input{color:var(--goldDeep);font-weight:800}
+
+  td.col-acoes{width:96px;text-align:center;white-space:nowrap}
+  .icobtn{border:0;background:transparent;cursor:pointer;color:var(--inkSoft);font-size:15px;line-height:1;padding:4px 6px;border-radius:6px}
+  .icobtn:hover{background:#F1F3F6;color:var(--navy)}
+  .icobtn.rm:hover{color:var(--red)}
+  .legenda{display:flex;gap:16px;flex-wrap:wrap;font-size:10.5px;color:var(--inkSoft);margin-top:4px}
+  .legenda .dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:middle}
+
+  .addbtn{margin:2px 0 8px;border:1px dashed var(--line);background:#fff;color:var(--navy);
+          font-size:12px;font-weight:700;padding:8px 12px;border-radius:8px;cursor:pointer}
+  .addbtn:hover{background:#F7F8FA}
+
+  .aviso{font-size:10px;color:var(--inkSoft);text-align:center;line-height:1.5;
+         margin-top:22px;padding-top:12px;border-top:1px solid var(--line)}
+
+  .actions{max-width:900px;margin:0 auto 30px;display:flex;gap:10px;padding:0 20px}
+  .actions button{flex:1;padding:12px;border:0;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer}
+  .btn-main{background:var(--navy);color:#fff}
+  .btn-ghost{background:#F2ECE2;color:var(--goldDeep)}
+  .hint{max-width:900px;margin:0 auto 30px;padding:0 20px;font-size:11px;color:var(--inkSoft);line-height:1.5}
+
+  @page{size:A4;margin:14mm}
+  @media print{
+    body{background:#fff}
+    .paper{box-shadow:none;border-radius:0;margin:0;padding:0;max-width:none}
+    .noprint{display:none !important}
+    td input{padding:8px 10px}
+    thead th,td.col-val{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    tr{break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+  <div class="paper" id="paper">
+    <div class="topo">
+      <div class="marca">
+        <div class="nome">INOVE</div>
+        <div class="tag">SEGUROS E SOLUÇÕES FINANCEIRAS · CERTIFICAÇÃO DIGITAL</div>
+      </div>
+      <div class="doc">
+        <div class="t">Certificados Digitais · Validade</div>
+        <div class="d" id="oData">—</div>
+      </div>
+    </div>
+
+    <div class="clienteRow">
+      <label>Cliente</label>
+      <input id="cliente" placeholder="Nome do cliente / grupo (opcional)">
+    </div>
+
+    <h3 class="sec">Empresas — Pessoa Jurídica (CNPJ)</h3>
+    <table>
+      <thead><tr><th style="width:52%">Empresa</th><th style="width:26%">CNPJ</th><th style="width:22%">Data de validade</th><th class="noprint"></th></tr></thead>
+      <tbody id="empBody"></tbody>
+    </table>
+    <button class="addbtn noprint" onclick="addLinha('emp')">+ Adicionar empresa</button>
+
+    <h3 class="sec">Pessoa Física (CPF)</h3>
+    <table>
+      <thead><tr><th style="width:52%">Nome</th><th style="width:26%">CPF</th><th style="width:22%">Data de validade</th><th class="noprint"></th></tr></thead>
+      <tbody id="pfBody"></tbody>
+    </table>
+    <button class="addbtn noprint" onclick="addLinha('pf')">+ Adicionar pessoa</button>
+
+    <div class="legenda">
+      <span><span class="dot" style="background:#FBEAEA;border:1px solid var(--red)"></span>Vencido ou vence em até 30 dias</span>
+      <span><span class="dot" style="background:#FDF3DA;border:1px solid var(--gold)"></span>Vence em 31 a 60 dias</span>
+    </div>
+
+    <div class="aviso">Documento informativo. As datas de validade devem ser conferidas junto ao certificado digital emitido.</div>
+  </div>
+
+  <div class="actions noprint">
+    <button class="btn-main" onclick="window.print()">Gerar PDF</button>
+    <button class="btn-ghost" onclick="limpar()">Restaurar exemplo</button>
+  </div>
+  <p class="hint noprint"><strong>Enviar no WhatsApp:</strong> clique em <em>Gerar PDF</em> → em "Destino" escolha
+  <strong>Salvar como PDF</strong> → anexe o arquivo na conversa.</p>
+
+<script>
+// Dados iniciais (do seu print) — você pode editar, adicionar e remover à vontade
+var EXEMPLO = {
+  cliente: "",
+  emp: [
+    ["SENSES UNIC AROMAS E PERFUMARIA LTDA", "48.908.592/0001-70", "15/07/2026"],
+    ["DM MARKETING OLFATIVO LTDA", "49.195.254/0001-00", "11/09/2026"],
+    ["F E F MARKETING OLFATIVO LTDA", "42.834.916/0001-97", "28/02/2026"],
+    ["VT IMPORTACAO COMERCIO E SERVICO LTDA", "54.188.147/0001-86", "20/03/2026"],
+    ["SSS PRODUTOS DE PERFUMARIA AUTOMOTIVA LTDA", "64.366.462/0001-00", "15/01/2027"]
+  ],
+  pf: [
+    ["DIEGO COLLADO", "383.916.228-94", "19/12/2026"]
+  ]
+};
+
+function el(id){return document.getElementById(id)}
+function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
+
+function linhaHTML(grupo, nome, doc, val){
+  var phDoc = grupo === "emp" ? "00.000.000/0000-00" : "000.000.000-00";
+  var phNome = grupo === "emp" ? "Razão social" : "Nome completo";
+  return '<tr>'
+    + '<td><input value="'+esc(nome)+'" placeholder="'+phNome+'" oninput="salvar()"></td>'
+    + '<td><input value="'+esc(doc)+'" placeholder="'+phDoc+'" oninput="salvar()"></td>'
+    + '<td class="col-val"><input value="'+esc(val)+'" placeholder="dd/mm/aaaa" oninput="salvar()"></td>'
+    + '<td class="col-acoes noprint">'
+    +   '<button class="icobtn" title="Subir" onclick="mover(this,-1)">&#9650;</button>'
+    +   '<button class="icobtn" title="Descer" onclick="mover(this,1)">&#9660;</button>'
+    +   '<button class="icobtn rm" title="Remover" onclick="this.closest(\'tr\').remove();salvar()">&times;</button>'
+    + '</td>'
+    + '</tr>';
+}
+
+function addLinha(grupo, nome, doc, val){
+  var body = el(grupo === "emp" ? "empBody" : "pfBody");
+  body.insertAdjacentHTML("beforeend", linhaHTML(grupo, nome || "", doc || "", val || ""));
+  salvar();
+}
+
+function coletar(){
+  function ler(grupo){
+    var body = el(grupo === "emp" ? "empBody" : "pfBody");
+    return Array.prototype.map.call(body.querySelectorAll("tr"), function(tr){
+      var inp = tr.querySelectorAll("input");
+      return [inp[0].value, inp[1].value, inp[2].value];
+    });
+  }
+  return { cliente: el("cliente").value, emp: ler("emp"), pf: ler("pf") };
+}
+function salvar(){ try{ localStorage.setItem("certificadosValidade", JSON.stringify(coletar())); }catch(e){} colorir(); }
+
+function mover(btn, dir){
+  var tr = btn.closest("tr");
+  if(dir < 0){ var prev = tr.previousElementSibling; if(prev) tr.parentNode.insertBefore(tr, prev); }
+  else { var next = tr.nextElementSibling; if(next) tr.parentNode.insertBefore(next, tr); }
+  salvar();
+}
+
+function parseData(s){
+  var m = String(s || "").trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if(!m) return null;
+  var d = new Date(+m[3], +m[2]-1, +m[1]); d.setHours(0,0,0,0);
+  return isNaN(d.getTime()) ? null : d;
+}
+function colorir(){
+  var hoje = new Date(); hoje.setHours(0,0,0,0);
+  Array.prototype.forEach.call(document.querySelectorAll("td.col-val"), function(td){
+    var inp = td.querySelector("input");
+    td.classList.remove("red","amber");
+    var dt = parseData(inp.value);
+    if(!dt) return;
+    var dias = Math.round((dt - hoje) / 86400000);
+    if(dias <= 30) td.classList.add("red");        // vencido ou vence em até 30 dias
+    else if(dias <= 60) td.classList.add("amber");  // vence em 31 a 60 dias
+  });
+}
+
+function montar(dados){
+  el("cliente").value = dados.cliente || "";
+  el("empBody").innerHTML = "";
+  el("pfBody").innerHTML = "";
+  (dados.emp || []).forEach(function(r){ addLinha("emp", r[0], r[1], r[2]); });
+  (dados.pf || []).forEach(function(r){ addLinha("pf", r[0], r[1], r[2]); });
+  if(!(dados.emp||[]).length) addLinha("emp");
+  if(!(dados.pf||[]).length) addLinha("pf");
+}
+
+function limpar(){
+  if(!confirm("Restaurar a tabela de exemplo? Isso apaga o que você preencheu.")) return;
+  try{ localStorage.removeItem("certificadosValidade"); }catch(e){}
+  montar(JSON.parse(JSON.stringify(EXEMPLO)));
+  salvar();
+}
+
+// data de hoje no cabeçalho
+(function(){
+  var d = new Date();
+  el("oData").textContent = String(d.getDate()).padStart(2,"0") + "/" + String(d.getMonth()+1).padStart(2,"0") + "/" + d.getFullYear();
+})();
+
+// início
+var salvo = null;
+try{ salvo = JSON.parse(localStorage.getItem("certificadosValidade") || "null"); }catch(e){}
+montar(salvo || JSON.parse(JSON.stringify(EXEMPLO)));
+el("cliente").addEventListener("input", salvar);
+</script>
+</body>
+</html>

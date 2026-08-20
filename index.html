@@ -91,6 +91,7 @@ const Download = (p) => <Svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-
 const Upload = (p) => <Svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></Svg>;
 const Star = (p) => <Svg {...p}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></Svg>;
 const Menu = (p) => <Svg {...p}><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/></Svg>;
+const FileText = (p) => <Svg {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/></Svg>;
 
 // ====== DADOS FIXOS ======
 const STATUSES = [
@@ -3606,6 +3607,41 @@ function ProximosVencimentos({ clientes }) {
   );
 }
 
+// ====== FORMULÁRIOS (ferramentas em página própria) ======
+function FormulariosView() {
+  const forms = [
+    { titulo: "Cotação de Seguro", desc: "Monte uma cotação de qualquer ramo (auto, vida, residencial, bike, celular...) e gere o PDF pra enviar ao cliente.", arquivo: "cotacao-seguro.html", Icon: Shield, cor: COLORS.burgundy },
+    { titulo: "Tabela de Certificados", desc: "Liste os certificados do cliente com CNPJ/CPF e validade (com alerta de cor pros que estão vencendo) e gere o PDF.", arquivo: "certificados-validade.html", Icon: ShieldCheck, cor: COLORS.skyBlue },
+  ];
+  return (
+    <div>
+      <h2 className="text-lg font-semibold" style={{ color: COLORS.ink, letterSpacing: "-0.2px" }}>Formulários</h2>
+      <p className="text-xs mb-4" style={{ color: COLORS.inkSoft }}>Abra um formulário, preencha e gere o PDF pra enviar no WhatsApp.</p>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        {forms.map((f) => (
+          <div key={f.arquivo} className="rounded-lg p-4 flex flex-col" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: f.cor + "1A" }}>
+                <f.Icon size={18} color={f.cor} />
+              </div>
+              <div className="text-sm font-semibold" style={{ color: COLORS.ink }}>{f.titulo}</div>
+            </div>
+            <p className="text-xs mb-4 flex-1" style={{ color: COLORS.inkSoft }}>{f.desc}</p>
+            <a href={f.arquivo} target="_blank" rel="noopener noreferrer"
+               className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-lg text-sm font-medium"
+               style={{ backgroundColor: COLORS.burgundy, color: "#fff", textDecoration: "none" }}>
+              <FileText size={15} color="#fff" /> Abrir formulário
+            </a>
+          </div>
+        ))}
+      </div>
+      <p className="text-[11px] mt-3" style={{ color: COLORS.inkSoft }}>
+        Cada formulário abre em uma nova aba, em tela cheia. Depois de preencher, use o botão "Gerar PDF" dentro dele.
+      </p>
+    </div>
+  );
+}
+
 // ====== DASHBOARD (tela inicial) ======
 function DashboardView({ atendimentos, clientes, financeiro, agendamentos, despesas, contas, movimentacoes, cartoes, comprasCartao, pagamentosFatura, onIr }) {
   const mk = monthKey(todayStr());
@@ -4436,6 +4472,7 @@ function App() {
     { key: "calendario", label: "Calendário", icon: CalendarIcon },
     { key: "financeiro", label: "Financeiro", icon: Wallet },
     { key: "clientes", label: "Clientes", icon: Users },
+    { key: "formularios", label: "Formulários", icon: FileText },
   ];
   const tabAtual = tabs.find((t) => t.key === tab) || tabs[0];
 
@@ -4542,6 +4579,7 @@ function App() {
         {tab === "clientes" && (
           <ClientesView clientes={clientes} atendimentos={atendimentos} financeiro={financeiro} onAdd={addCliente} onEdit={editCliente} onDelete={deleteCliente} />
         )}
+        {tab === "formularios" && <FormulariosView />}
       </div>
       </div>
     </div>
