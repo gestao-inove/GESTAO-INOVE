@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cotação de Seguro Auto · Inove</title>
+<style>
+  :root{
+    --navy:#001C4E; --gold:#C9A227; --goldDeep:#96791C;
+    --ink:#101B33; --inkSoft:#5B6478; --line:#E2E5EC; --bg:#F4F6F9; --green:#128C4B;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+       -webkit-font-smoothing:antialiased}
+  .wrap{max-width:560px;margin:0 auto;padding:18px}
+
+  .topo{background:var(--navy);border-radius:16px 16px 0 0;padding:22px 22px 18px;text-align:center}
+  .topo .nome{color:#fff;font-size:26px;font-weight:800;letter-spacing:1.5px}
+  .topo .tag{color:#9FB0CC;font-size:10.5px;letter-spacing:.4px;margin-top:4px}
+  .topo .chamada{color:#fff;font-size:15px;font-weight:700;margin-top:14px}
+  .topo .sub{color:#C9D6E8;font-size:12px;margin-top:4px;line-height:1.4}
+
+  .card{background:#fff;border:1px solid var(--line);border-top:0;border-radius:0 0 16px 16px;
+        padding:20px;box-shadow:0 4px 20px rgba(16,27,51,.06)}
+  .secao{font-size:11px;font-weight:800;color:var(--goldDeep);text-transform:uppercase;letter-spacing:.6px;
+         margin:20px 0 2px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  .secao:first-child{margin-top:0}
+  label{display:block;font-size:12.5px;font-weight:600;color:var(--inkSoft);margin:14px 0 5px}
+  label .req{color:#B0413E}
+  input,select,textarea{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;
+        font-size:16px;font-family:inherit;color:var(--ink);background:#fff}
+  input:focus,select:focus,textarea:focus{outline:2px solid var(--navy);outline-offset:-1px}
+  textarea{min-height:60px;resize:vertical}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .hint{font-size:11px;color:var(--inkSoft);margin-top:5px;line-height:1.5}
+  .oculto{display:none}
+
+  .btn{width:100%;margin-top:22px;padding:15px;border:0;border-radius:12px;font-size:16px;font-weight:800;
+       cursor:pointer;background:var(--green);color:#fff}
+  .btn:active{opacity:.9}
+  .aviso{font-size:11px;color:var(--inkSoft);text-align:center;margin-top:14px;line-height:1.5}
+  .erro{color:#B0413E;font-size:12px;font-weight:600;margin-top:10px;text-align:center;min-height:16px}
+  @media(max-width:420px){ .row2{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topo">
+    <div class="nome">INOVE</div>
+    <div class="tag">SEGUROS E SOLUÇÕES FINANCEIRAS · CERTIFICAÇÃO DIGITAL</div>
+    <div class="chamada">Cotação de Seguro Auto</div>
+    <div class="sub">Preencha os dados abaixo pra gente montar sua cotação. Leva 2 minutinhos. 💙</div>
+  </div>
+
+  <div class="card">
+    <div class="secao">Seus dados</div>
+    <div class="row2">
+      <div>
+        <label>CPF <span class="req">*</span></label>
+        <input id="cpf" inputmode="numeric" placeholder="Só números">
+      </div>
+      <div>
+        <label>Estado civil</label>
+        <select id="civil">
+          <option value="">Selecione...</option>
+          <option>Solteiro(a)</option>
+          <option>Casado(a)</option>
+          <option>União estável</option>
+          <option>Divorciado(a)</option>
+          <option>Viúvo(a)</option>
+        </select>
+      </div>
+    </div>
+    <label>CEP de pernoite</label>
+    <input id="cep" inputmode="numeric" placeholder="Onde o carro passa a noite">
+
+    <div class="secao">O veículo</div>
+    <label>Modelo do veículo <span class="req">*</span></label>
+    <input id="modelo" placeholder="Ex: Honda Civic EXL 2022">
+    <div class="row2">
+      <div>
+        <label>Placa</label>
+        <input id="placa" placeholder="ABC1D23">
+      </div>
+      <div>
+        <label>Somente você irá conduzir?</label>
+        <select id="somente">
+          <option>Sim</option>
+          <option>Não</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="boxCondutor" class="oculto">
+      <label>CPF do outro condutor</label>
+      <input id="cpf2" inputmode="numeric" placeholder="Só números">
+      <div class="row2">
+        <div>
+          <label>Estado civil do outro condutor</label>
+          <select id="civil2">
+            <option value="">Selecione...</option>
+            <option>Solteiro(a)</option>
+            <option>Casado(a)</option>
+            <option>União estável</option>
+            <option>Divorciado(a)</option>
+            <option>Viúvo(a)</option>
+          </select>
+        </div>
+        <div>
+          <label>Relação com o outro condutor</label>
+          <select id="relacao">
+            <option value="">Selecione...</option>
+            <option>Cônjuge</option>
+            <option>Filho(a)</option>
+            <option>Pai</option>
+            <option>Mãe</option>
+            <option>Primo(a)</option>
+            <option>Amigo(a)</option>
+            <option>Outro</option>
+          </select>
+        </div>
+      </div>
+      <label>Este será o principal condutor?</label>
+      <select id="principal2">
+        <option>Não</option>
+        <option>Sim</option>
+      </select>
+      <div class="hint">(o principal condutor é quem dirige a maior parte do tempo)</div>
+    </div>
+
+    <div class="secao">Uso e moradia</div>
+    <label>Você mora em:</label>
+    <select id="mora">
+      <option value="">Selecione...</option>
+      <option>Casa</option>
+      <option>Apartamento</option>
+      <option>Condomínio fechado</option>
+    </select>
+
+    <label>Qual a utilização do veículo?</label>
+    <select id="uso">
+      <option value="">Selecione...</option>
+      <option>Ida e volta ao trabalho / lazer</option>
+      <option>Somente lazer</option>
+      <option>Aplicativo</option>
+      <option>Visita a clientes</option>
+      <option>Entregas</option>
+    </select>
+
+    <div id="boxTrab" class="oculto">
+      <label>No trabalho, onde deixa o carro?</label>
+      <select id="ondeTrab">
+        <option value="">Selecione...</option>
+        <option>Garagem / estacionamento fechado</option>
+        <option>Na rua</option>
+      </select>
+    </div>
+
+    <label>Utiliza para ir estudar?</label>
+    <select id="estuda">
+      <option>Não</option>
+      <option>Sim</option>
+    </select>
+
+    <label>Mora com menores de 26 anos?</label>
+    <select id="menores">
+      <option>Não</option>
+      <option>Sim</option>
+    </select>
+    <div id="boxMenores" class="oculto">
+      <label>Eles utilizam o veículo?</label>
+      <select id="menoresUsam">
+        <option>Não</option>
+        <option>Sim</option>
+      </select>
+    </div>
+
+    <label>Observações (opcional)</label>
+    <input id="obs" placeholder="Ex: prefiro ser chamada à tarde">
+
+    <button class="btn" onclick="enviar()">Enviar pelo WhatsApp</button>
+    <div class="erro" id="erro"></div>
+    <div class="aviso">Ao enviar, o WhatsApp abre com seus dados preenchidos — é só apertar em enviar. 😊</div>
+  </div>
+</div>
+
+<script>
+// WhatsApp da corretora (só números, com 55 e DDD) — pra onde as solicitações vão.
+var WHATSAPP = "5519997639554";
+
+function el(id){return document.getElementById(id)}
+function v(id){var e=el(id);return e?(e.value||"").trim():""}
+
+el("somente").addEventListener("change", function(){
+  el("boxCondutor").className = this.value === "Não" ? "" : "oculto";
+});
+el("uso").addEventListener("change", function(){
+  el("boxTrab").className = (this.value && this.value !== "Somente lazer") ? "" : "oculto";
+});
+el("menores").addEventListener("change", function(){
+  el("boxMenores").className = this.value === "Sim" ? "" : "oculto";
+});
+
+function linha(rot, val){ return val ? ("*"+rot+":* "+val+"\n") : ""; }
+
+function enviar(){
+  var erro = el("erro"); erro.textContent = "";
+  if(!v("cpf")){ erro.textContent = "Por favor, preencha seu CPF."; el("cpf").focus(); return; }
+  if(!v("modelo")){ erro.textContent = "Por favor, informe o modelo do veículo."; el("modelo").focus(); return; }
+  if(WHATSAPP.indexOf("DDD") > -1 || WHATSAPP.indexOf("NUMERO") > -1){
+    erro.textContent = "Formulário ainda não configurado com o número da corretora."; return;
+  }
+
+  var trab = (el("boxTrab").className === "") ? v("ondeTrab") : "";
+  var menoresUsam = (v("menores") === "Sim") ? v("menoresUsam") : "";
+  var outro = (v("somente") === "Não");
+
+  var msg = "Olá! Quero fazer uma cotação de seguro auto. 🚗\n\n"
+    + linha("CPF", v("cpf"))
+    + linha("Estado civil", v("civil"))
+    + linha("CEP de pernoite", v("cep"))
+    + linha("Modelo", v("modelo"))
+    + linha("Placa", v("placa"))
+    + linha("Somente o titular conduz", v("somente"))
+    + (outro ? (linha("CPF do outro condutor", v("cpf2"))
+             + linha("Estado civil do outro condutor", v("civil2"))
+             + linha("Relação com o outro condutor", v("relacao"))
+             + linha("É o principal condutor", v("principal2"))) : "")
+    + linha("Mora em", v("mora"))
+    + linha("Utilização", v("uso"))
+    + linha("No trabalho, deixa", trab)
+    + linha("Usa para estudar", v("estuda"))
+    + linha("Mora com menores de 26", v("menores"))
+    + linha("Menores usam o veículo", menoresUsam)
+    + linha("Observações", v("obs"))
+    + "\n_Enviado pelo formulário INOVE_";
+
+  window.location.href = "https://wa.me/" + WHATSAPP + "?text=" + encodeURIComponent(msg);
+}
+</script>
+</body>
+</html>
