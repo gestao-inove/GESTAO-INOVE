@@ -4012,6 +4012,28 @@ function App() {
     } catch (e) { console.error(e); }
   };
 
+  // Limpeza única: remove do financeiro os lançamentos NÃO recebidos de atendimentos que ainda
+  // não fecharam (seguro sem "aceito", certificado sem "emitido"). Corrige os "fantasmas" antigos.
+  const limparFinanceiroNaoFechado = async (ats, fins) => {
+    try { if (localStorage.getItem("finNaoFechadoLimpo") === "1") return; } catch (e) {}
+    const remover = (fins || []).filter((f) => {
+      if (!f.atendimentoId || f.pago) return false;
+      const at = ats.find((a) => a.id === f.atendimentoId);
+      return at && !concluiuVenda(at.categoria, at.status);
+    });
+    if (remover.length === 0) {
+      try { localStorage.setItem("finNaoFechadoLimpo", "1"); } catch (e) {}
+      return;
+    }
+    try {
+      const ids = {};
+      remover.forEach((f) => { ids[f.id] = true; });
+      setFinanceiro((prev) => prev.filter((f) => !ids[f.id]));
+      for (const f of remover) await apiDelete(`/api/financeiro/${f.id}`);
+      localStorage.setItem("finNaoFechadoLimpo", "1");
+    } catch (e) { console.error(e); }
+  };
+
   // Popula a base de clientes uma única vez com os nomes que já existem (atendimentos + clientes)
   // e o WhatsApp salvo neste navegador. Assim a busca já vem cheia no primeiro uso.
   const semearContatos = async (ats, cls, conts) => {
@@ -4063,7 +4085,8 @@ function App() {
       setContatosCache(conts);
       setAtendimentos(ats);
       setAgendamentos(ag.map(mapAgendamento));
-      setFinanceiro(f.map(mapFinanceiro));
+      const fins = f.map(mapFinanceiro);
+      setFinanceiro(fins);
       setDespesas(d.map(mapDespesa));
       setCartoes(ct.map(mapCartao));
       setComprasCartao(cc.map(mapCompraCartao));
@@ -4073,6 +4096,7 @@ function App() {
       setPagamentosFatura(pf.map(mapPagamentoFatura));
       await sincronizarClientesEmitidos(ats, cls);
       await semearContatos(ats, cls, conts);
+      await limparFinanceiroNaoFechado(ats, fins);
     } catch (e) {
       console.error(e);
       setErro("Não foi possível conectar ao servidor. Ele pode estar 'acordando' — aguarde até 1 minuto e tente de novo.");
@@ -4168,19 +4192,20 @@ function App() {
         setAgendamentos((prev) => [...prev, ag]);
         await apiPost("/api/agendamentos", ag);
       }
-      // Seguro: a comissão vira N parcelas (uma por mês). Certificado: valor cheio, uma vez.
-      const aindaSolicitado = item.categoria === "certificado" && item.status === "solicitado";
-      if (item.categoria === "seguro" && (item.valorComissao || 0) > 0) {
-        const lancs = montarLancamentosComissao(item);
-        setFinanceiro((prev) => [...lancs, ...prev]);
-        for (const l of lancs) await apiPost("/api/financeiro", l);
-      } else if (item.categoria === "certificado" && (item.valor || 0) > 0 && !aindaSolicitado) {
-        const lanc = { id: uid(), cliente: item.cliente, categoria: item.categoria, subtipo: item.subtipo,
-                       valorPago: item.valor, custo: item.custo || 0, forma: item.forma || "",
-                       data: item.dataAgendamento || todayStr(), pago: item.pagamento !== "pendente",
-                       atendimentoId: item.id };
-        setFinanceiro((prev) => [lanc, ...prev]);
-        await apiPost("/api/financeiro", lanc);
+      // Só entra no financeiro quando a venda fechou: seguro "aceito", certificado "emitido".
+      if (concluiuVenda(item.categoria, item.status)) {
+        if (item.categoria === "seguro" && (item.valorComissao || 0) > 0) {
+          const lancs = montarLancamentosComissao(item);
+          setFinanceiro((prev) => [...lancs, ...prev]);
+          for (const l of lancs) await apiPost("/api/financeiro", l);
+        } else if (item.categoria === "certificado" && (item.valor || 0) > 0) {
+          const lanc = { id: uid(), cliente: item.cliente, categoria: item.categoria, subtipo: item.subtipo,
+                         valorPago: item.valor, custo: item.custo || 0, forma: item.forma || "",
+                         data: item.dataAgendamento || todayStr(), pago: item.pagamento !== "pendente",
+                         atendimentoId: item.id };
+          setFinanceiro((prev) => [lanc, ...prev]);
+          await apiPost("/api/financeiro", lanc);
+        }
       }
     } catch (e) { console.error(e); setErro("Não foi possível salvar o atendimento no servidor."); }
   };
@@ -4205,30 +4230,45 @@ function App() {
         }
       }
 
-      // Sincroniza o lançamento financeiro vinculado
-      if (item.categoria === "seguro" && (item.valorComissao || 0) > 0) {
+      // Sincroniza o financeiro: só existe quando a venda fechou (seguro "aceito", certificado "emitido")
+      const fechada = concluiuVenda(item.categoria, item.status);
+      if (item.categoria === "seguro") {
         const existentes = financeiro.filter((f) => f.atendimentoId === item.id);
-        // Se alguma parcela já foi recebida, não recria (evita perder o recebimento)
-        if (!existentes.some((f) => f.pago)) {
-          for (const f of existentes) await apiDelete(`/api/financeiro/${f.id}`);
-          const lancs = montarLancamentosComissao(item);
-          setFinanceiro((prev) => [...lancs, ...prev.filter((f) => f.atendimentoId !== item.id)]);
-          for (const l of lancs) await apiPost("/api/financeiro", l);
+        if (fechada && (item.valorComissao || 0) > 0) {
+          // Se alguma parcela já foi recebida, não recria (evita perder o recebimento)
+          if (!existentes.some((f) => f.pago)) {
+            for (const f of existentes) await apiDelete(`/api/financeiro/${f.id}`);
+            const lancs = montarLancamentosComissao(item);
+            setFinanceiro((prev) => [...lancs, ...prev.filter((f) => f.atendimentoId !== item.id)]);
+            for (const l of lancs) await apiPost("/api/financeiro", l);
+          }
+        } else {
+          // Não fechou (iniciado/recusado): remove os lançamentos ainda não recebidos
+          const naoPagos = existentes.filter((f) => !f.pago);
+          if (naoPagos.length) {
+            setFinanceiro((prev) => prev.filter((f) => !(f.atendimentoId === item.id && !f.pago)));
+            for (const f of naoPagos) await apiDelete(`/api/financeiro/${f.id}`);
+          }
         }
-      } else if (item.categoria === "certificado" && (item.valor || 0) > 0) {
+      } else if (item.categoria === "certificado") {
         const existenteF = financeiro.find((f) => f.atendimentoId === item.id);
-        const dadosF = { cliente: item.cliente, categoria: item.categoria, subtipo: item.subtipo,
-                         valorPago: item.valor, custo: item.custo || 0, forma: item.forma || "",
-                         data: item.dataAgendamento || (existenteF ? existenteF.data : todayStr()),
-                         pago: item.pagamento !== "pendente" };
-        const soSolicitado = item.status === "solicitado";
-        if (existenteF) {
-          setFinanceiro((prev) => prev.map((f) => (f.id === existenteF.id ? { ...f, ...dadosF } : f)));
-          await apiPatch(`/api/financeiro/${existenteF.id}`, dadosF);
-        } else if (!soSolicitado) {
-          const novoF = { id: uid(), ...dadosF, atendimentoId: item.id };
-          setFinanceiro((prev) => [novoF, ...prev]);
-          await apiPost("/api/financeiro", novoF);
+        if (fechada && (item.valor || 0) > 0) {
+          const dadosF = { cliente: item.cliente, categoria: item.categoria, subtipo: item.subtipo,
+                           valorPago: item.valor, custo: item.custo || 0, forma: item.forma || "",
+                           data: item.dataAgendamento || (existenteF ? existenteF.data : todayStr()),
+                           pago: item.pagamento !== "pendente" };
+          if (existenteF) {
+            setFinanceiro((prev) => prev.map((f) => (f.id === existenteF.id ? { ...f, ...dadosF } : f)));
+            await apiPatch(`/api/financeiro/${existenteF.id}`, dadosF);
+          } else {
+            const novoF = { id: uid(), ...dadosF, atendimentoId: item.id };
+            setFinanceiro((prev) => [novoF, ...prev]);
+            await apiPost("/api/financeiro", novoF);
+          }
+        } else if (existenteF && !existenteF.pago) {
+          // Não emitido: remove o lançamento ainda não recebido
+          setFinanceiro((prev) => prev.filter((f) => f.id !== existenteF.id));
+          await apiDelete(`/api/financeiro/${existenteF.id}`);
         }
       }
     } catch (e) { console.error(e); setErro("Não foi possível salvar as alterações."); }
@@ -4239,24 +4279,32 @@ function App() {
       await apiPatch(`/api/atendimentos/${id}`, { status });
       const item = atendimentos.find((a) => a.id === id);
 
-      // Certificado: o valor só entra no financeiro quando sai de "Solicitado"
-      if (item && item.categoria === "certificado") {
-        const lanc = financeiro.find((f) => f.atendimentoId === id);
-        if (status === "solicitado") {
-          // Voltou para solicitado: desfaz o lançamento, a menos que já tenha sido recebido
-          if (lanc && !lanc.pago) {
-            setFinanceiro((prev) => prev.filter((f) => f.id !== lanc.id));
-            await apiDelete(`/api/financeiro/${lanc.id}`);
+      // Só entra no financeiro quando a venda fechou (seguro "aceito", certificado "emitido")
+      if (item) {
+        const existentes = financeiro.filter((f) => f.atendimentoId === id);
+        const fechada = concluiuVenda(item.categoria, status);
+        if (fechada && existentes.length === 0) {
+          if (item.categoria === "seguro" && (item.valorComissao || 0) > 0) {
+            const lancs = montarLancamentosComissao(item);
+            setFinanceiro((prev) => [...lancs, ...prev]);
+            for (const l of lancs) await apiPost("/api/financeiro", l);
+          } else if (item.categoria === "certificado" && (item.valor || 0) > 0) {
+            const novoLanc = {
+              id: uid(), cliente: item.cliente, categoria: item.categoria, subtipo: item.subtipo,
+              valorPago: item.valor, custo: item.custo || 0, forma: item.forma || "",
+              data: item.dataAgendamento || todayStr(), pago: item.pagamento !== "pendente",
+              atendimentoId: id,
+            };
+            setFinanceiro((prev) => [novoLanc, ...prev]);
+            await apiPost("/api/financeiro", novoLanc);
           }
-        } else if (!lanc && item.valor > 0) {
-          const novoLanc = {
-            id: uid(), cliente: item.cliente, categoria: item.categoria, subtipo: item.subtipo,
-            valorPago: item.valor, custo: item.custo || 0, forma: item.forma || "",
-            data: item.dataAgendamento || todayStr(), pago: item.pagamento !== "pendente",
-            atendimentoId: id,
-          };
-          setFinanceiro((prev) => [novoLanc, ...prev]);
-          await apiPost("/api/financeiro", novoLanc);
+        } else if (!fechada) {
+          // Voltou/ainda não fechou (recusado, iniciado, agendado, solicitado): remove os não recebidos
+          const naoPagos = existentes.filter((f) => !f.pago);
+          if (naoPagos.length) {
+            setFinanceiro((prev) => prev.filter((f) => !(f.atendimentoId === id && !f.pago)));
+            for (const f of naoPagos) await apiDelete(`/api/financeiro/${f.id}`);
+          }
         }
       }
 
