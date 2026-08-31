@@ -352,7 +352,14 @@ function num(v){
   return isNaN(n) ? 0 : n;
 }
 function fmt(n){ return "R$ " + Number(n).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2}); }
-function dinheiro(v){ if(!v) return ""; var n = num(v); return n ? fmt(n) : String(v); }
+function dinheiro(v){
+  if(!v) return "";
+  var s = String(v).trim();
+  // Só formata como R$ quando for número puro. Se tiver letra (km, dias) ou %, mostra como foi digitado.
+  if(/[a-zA-Z%]/.test(s)) return s;
+  var n = num(s);
+  return n ? fmt(n) : s;
+}
 function dataPt(v){ if(!v) return ""; var p = v.split("-"); return p.length===3 ? p[2]+"/"+p[1]+"/"+p[0] : v; }
 function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function nomeSeguradora(i){ var s = val("s"+i); return s === "__outra__" ? (val("outra"+i) || "Outra seguradora") : s; }
