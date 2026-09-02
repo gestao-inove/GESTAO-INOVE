@@ -449,6 +449,18 @@ function montarLancamentosComissao(item) {
   }
   return lancs;
 }
+// Meses em que uma conta fixa já foi paga (lista de "YYYY-MM"), guardados como texto JSON
+function parseMesesPagos(v) {
+  if (Array.isArray(v)) return v;
+  if (!v) return [];
+  try { const a = JSON.parse(v); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+}
+function ehDespesaFixa(d) { return d && (d.tipo === "fixa" || d.tipo === "negocio_fixa"); }
+// Está paga no mês mk? Conta fixa: olha a lista de meses pagos. Avulso: usa o campo pago (é uma ocorrência só).
+function despesaPagaNoMes(d, mk) {
+  if (ehDespesaFixa(d)) return (d.mesesPagos || []).includes(mk);
+  return !!d.pago;
+}
 function mapDespesa(row) {
   return {
     id: row.id, titulo: row.titulo, tipo: row.tipo,
@@ -456,6 +468,7 @@ function mapDespesa(row) {
     data: row.data ? String(row.data).slice(0, 10) : "",
     notas: row.notas || "", forma: row.forma || "",
     pago: row.pago === true,
+    mesesPagos: parseMesesPagos(row.meses_pagos),
   };
 }
 function mapCartao(row) {
@@ -1493,7 +1506,7 @@ function GraficoEntradasSaidas({ dados }) {
 }
 
 function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
-                             despesas, onAddDespesa, onEditDespesa, onDeleteDespesa,
+                             despesas, onAddDespesa, onEditDespesa, onDeleteDespesa, onMarcarMesPago,
                              contas, movimentacoes, onAddConta, onDeleteConta, onAddMov, onDeleteMov, onSetPrincipal }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
@@ -1834,22 +1847,30 @@ function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
       )}
       {gastosAberto && (
       <div className="space-y-2">
-        {gastosDoMes.map((d) => (
-          <div key={d.id} className="rounded-lg p-3 flex items-center gap-3" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
+        {gastosDoMes.map((d) => {
+          const fixa = d.tipo === "negocio_fixa";
+          const pagaNoMes = despesaPagaNoMes(d, refMes);
+          const dataMostrar = fixa ? (refMes + "-" + ((d.data || "").slice(8, 10) || "01")) : d.data;
+          return (
+          <div key={d.id} className="rounded-lg p-3 flex items-center gap-2.5" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
             <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: COLORS.slate + "1A" }}>
-              {d.tipo === "negocio_fixa" ? <Repeat size={16} color={COLORS.slate} /> : <Receipt size={16} color={COLORS.slate} />}
+              {fixa ? <Repeat size={16} color={COLORS.slate} /> : <Receipt size={16} color={COLORS.slate} />}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold truncate flex items-center gap-1.5" style={{ color: COLORS.ink }}>
-                {d.titulo}
-                {d.pago
-                  ? <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold" style={{ backgroundColor: COLORS.green + "1A", color: COLORS.green }}>PAGO</span>
-                  : ((d.data || "") > todayStr() && <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold" style={{ backgroundColor: COLORS.camel + "26", color: COLORS.camelDeep }}>AGENDADO</span>)}
-              </div>
-              <div className="text-xs" style={{ color: COLORS.inkSoft }}>{d.tipo === "negocio_fixa" ? "Conta fixa" : "Gasto avulso"} · {fmtDatePt(d.data)}{d.forma ? ` · ${d.forma}` : ""}</div>
+              <div className="text-sm font-semibold truncate" style={{ color: COLORS.ink }}>{d.titulo}</div>
+              <div className="text-xs" style={{ color: COLORS.inkSoft }}>{fixa ? "Conta fixa" : "Gasto avulso"} · {fmtDatePt(dataMostrar)}{d.forma ? ` · ${d.forma}` : ""}</div>
               {d.notas && <p className="text-xs mt-0.5" style={{ color: COLORS.inkSoft }}>{d.notas}</p>}
             </div>
             <div className="text-sm font-bold flex-shrink-0" style={{ color: COLORS.red, fontFamily: "ui-monospace, monospace" }}>− {fmtMoney(d.valor)}</div>
+            {onMarcarMesPago && (
+              <button onClick={() => onMarcarMesPago(d, refMes)} className="px-2 py-1 rounded-lg text-[10px] font-bold flex-shrink-0 whitespace-nowrap"
+                      style={pagaNoMes
+                        ? { backgroundColor: COLORS.green + "1A", color: COLORS.green }
+                        : { backgroundColor: "#F1F3F6", color: COLORS.inkSoft, border: `1px solid ${COLORS.line}` }}
+                      title={pagaNoMes ? "Pago neste mês — clique para desmarcar" : "Marcar como pago neste mês"}>
+                {pagaNoMes ? "PAGO ✓" : "Marcar pago"}
+              </button>
+            )}
             <button onClick={() => setEditingGasto(d)} className="p-1.5 rounded-lg hover:bg-black/5 flex-shrink-0" title="Editar">
               <PenLine size={13} color={COLORS.inkSoft} />
             </button>
@@ -1857,7 +1878,8 @@ function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
               <Trash2 size={14} color={COLORS.inkSoft} />
             </button>
           </div>
-        ))}
+          );
+        })}
       </div>
       )}
 
@@ -1918,17 +1940,23 @@ function DespesaForm({ item, tipoInicial, onSubmit, submitLabel }) {
           <input type="date" style={inputStyle} value={data} onChange={(e) => setData(e.target.value)} />
         </Field>
       </div>
-      <Field label="Situação">
-        <div className="flex gap-2">
-          <Toggle ativo={pago} cor={COLORS.green} onClick={() => setPago(true)}>Pago</Toggle>
-          <Toggle ativo={!pago} cor={COLORS.camelDeep} onClick={() => setPago(false)}>Pendente</Toggle>
-        </div>
-        <p className="text-[11px] mt-1" style={{ color: COLORS.inkSoft }}>
-          {pago
-            ? "Pago: já sai da conta agora, mesmo antes da data."
-            : "Pendente: sai da conta automaticamente quando a data chegar."}
+      {tipo !== "fixa" ? (
+        <Field label="Situação">
+          <div className="flex gap-2">
+            <Toggle ativo={pago} cor={COLORS.green} onClick={() => setPago(true)}>Pago</Toggle>
+            <Toggle ativo={!pago} cor={COLORS.camelDeep} onClick={() => setPago(false)}>Pendente</Toggle>
+          </div>
+          <p className="text-[11px] mt-1" style={{ color: COLORS.inkSoft }}>
+            {pago
+              ? "Pago: já sai da conta agora, mesmo antes da data."
+              : "Pendente: sai da conta automaticamente quando a data chegar."}
+          </p>
+        </Field>
+      ) : (
+        <p className="text-[11px] mb-3" style={{ color: COLORS.inkSoft }}>
+          Conta fixa: o pagamento é marcado <strong>mês a mês</strong> na lista de gastos (botão "Marcar pago"). Cada mês começa como não pago.
         </p>
-      </Field>
+      )}
       <Field label="Como foi paga">
         <select style={inputStyle} value={forma} onChange={(e) => setForma(e.target.value)}>
           {FORMAS_DESPESA.map((f) => <option key={f} value={f}>{f}</option>)}
@@ -2570,7 +2598,7 @@ function fluxoNegocioConta(financeiro, despesas) {
       let guard = 0;
       while (mk <= mesAtual && guard < 240) {
         const dataOcorrencia = mk + "-" + dia;
-        if (dataOcorrencia <= hoje || (d.pago && mk === mesAtual)) {
+        if (dataOcorrencia <= hoje || (d.mesesPagos || []).includes(mk)) {
           movs.push({ id: "auto-fix-" + d.id + "-" + mk, auto: true, tipo: "saida", valor: d.valor || 0,
                       descricao: "Conta fixa · " + d.titulo, data: dataOcorrencia, origem: "despesa", origemId: d.id });
         }
@@ -2966,38 +2994,36 @@ function DespesasView({ despesas, onAdd, onEdit, onDelete, totalRecebidoNegocio,
   );
 }
 
-// Monta a lista de "contas a pagar" dos próximos ~2 meses:
-// gastos avulsos não pagos (com data), próxima ocorrência das contas fixas, e faturas de cartão em aberto.
-function montarContasAPagar(despesas, cartoes, comprasCartao, pagamentosFatura) {
+// Monta a lista de "contas a pagar" do MÊS selecionado (mk):
+// gastos avulsos não pagos daquele mês, a ocorrência das contas fixas naquele mês, e faturas de cartão em aberto do mês.
+function montarContasAPagar(despesas, cartoes, comprasCartao, pagamentosFatura, mk) {
   const hoje = todayStr();
-  const limite = addMesesData(hoje, 2);
+  const mesAtual = monthKey(hoje);
   const itens = [];
   (despesas || []).forEach((d) => {
     const recorrente = d.tipo === "fixa" || d.tipo === "negocio_fixa";
     const empresa = d.tipo === "negocio_fixa" || d.tipo === "negocio_avulso";
     if (recorrente) {
+      // Conta fixa: mostra a ocorrência do mês, se ela já começou até esse mês
+      if (monthKey(d.data) > mk) return;
+      if ((d.mesesPagos || []).includes(mk)) return; // esse mês já foi pago
       const dia = (d.data || "").slice(8, 10) || "01";
-      let nd = monthKey(hoje) + "-" + dia;
-      if (nd < hoje) nd = addMonths(monthKey(hoje), 1) + "-" + dia;
-      if (d.pago && monthKey(nd) === monthKey(hoje)) return; // já paga neste ciclo
-      if (nd <= limite) itens.push({ id: "fix-" + d.id, tipo: "fixa", titulo: d.titulo, empresa, valor: d.valor || 0, data: nd, atrasada: false });
+      const data = mk + "-" + dia;
+      itens.push({ id: "fix-" + d.id + "-" + mk, tipo: "fixa", titulo: d.titulo, empresa, valor: d.valor || 0, data, atrasada: data < hoje });
     } else {
-      if (d.pago || !d.data) return;
+      // Gasto avulso: só aparece no mês dele e se não estiver pago
+      if (d.pago || !d.data || monthKey(d.data) !== mk) return;
       itens.push({ id: "desp-" + d.id, tipo: "gasto", titulo: d.titulo, empresa, valor: d.valor || 0, data: d.data, atrasada: d.data < hoje });
     }
   });
   (cartoes || []).forEach((ct) => {
-    for (let i = 0; i < 3; i++) {
-      const mk = addMonths(monthKey(hoje), i);
-      const total = (comprasCartao || []).filter((c) => c.cartaoId === ct.id)
-        .reduce((s, c) => { const p = parcelaInfo(c, mk); return p ? s + c.valorParcela : s; }, 0);
-      if (total <= 0) continue;
-      if ((pagamentosFatura || []).some((p) => p.cartaoId === ct.id && p.mes === mk)) continue;
-      const dia = ct.diaVencimento ? String(ct.diaVencimento).padStart(2, "0") : "10";
-      const data = mk + "-" + dia;
-      if (data > limite) continue;
-      itens.push({ id: "fat-" + ct.id + "-" + mk, tipo: "fatura", titulo: "Fatura " + ct.nome, empresa: false, valor: total, data, atrasada: data < hoje });
-    }
+    const total = (comprasCartao || []).filter((c) => c.cartaoId === ct.id)
+      .reduce((s, c) => { const p = parcelaInfo(c, mk); return p ? s + c.valorParcela : s; }, 0);
+    if (total <= 0) return;
+    if ((pagamentosFatura || []).some((p) => p.cartaoId === ct.id && p.mes === mk)) return;
+    const dia = ct.diaVencimento ? String(ct.diaVencimento).padStart(2, "0") : "10";
+    const data = mk + "-" + dia;
+    itens.push({ id: "fat-" + ct.id + "-" + mk, tipo: "fatura", titulo: "Fatura " + ct.nome, empresa: false, valor: total, data, atrasada: data < hoje });
   });
   return itens.sort((a, b) => (a.data || "").localeCompare(b.data || ""));
 }
@@ -3101,7 +3127,7 @@ function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes, car
   );
 
   // Contas a pagar (próximos ~2 meses) — vencimentos de gastos, contas fixas e faturas
-  const contasPagar = montarContasAPagar(despesas, cartoes, comprasCartao, pagamentosFatura);
+  const contasPagar = montarContasAPagar(despesas, cartoes, comprasCartao, pagamentosFatura, refMes);
   const totalPagar = contasPagar.reduce((s, i) => s + (i.valor || 0), 0);
   const hojeStr2 = todayStr();
   const diasAteVenc = (d) => Math.round((new Date(d) - new Date(hojeStr2)) / 86400000);
@@ -3144,14 +3170,14 @@ function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes, car
         <button onClick={() => setContasPagarAberto((v) => !v)} className="w-full flex items-center gap-2 px-3 py-2.5">
           <CalendarPlus size={15} color={COLORS.burgundy} />
           <span className="text-sm font-semibold text-left" style={{ color: COLORS.ink }}>
-            Contas a pagar {contasPagar.length > 0 ? `· ${contasPagar.length} (${fmtMoney(totalPagar)})` : ""}
+            <span className="capitalize">Contas a pagar · {monthLabelShort(refMes)}</span>{contasPagar.length > 0 ? ` · ${fmtMoney(totalPagar)}` : ""}
           </span>
           <span className="ml-auto">{contasPagarAberto ? <ChevronDown size={16} color={COLORS.inkSoft} /> : <ChevronRight size={16} color={COLORS.inkSoft} />}</span>
         </button>
         {contasPagarAberto && (
           <div className="px-2 pb-2">
             {contasPagar.length === 0 && (
-              <p className="text-xs py-3 text-center" style={{ color: COLORS.inkSoft }}>Nada a pagar nos próximos 2 meses. 🎉</p>
+              <p className="text-xs py-3 text-center capitalize" style={{ color: COLORS.inkSoft }}>Nada a pagar em {monthLabelShort(refMes)}. 🎉</p>
             )}
             <div className="space-y-1.5">
               {contasPagar.map((c) => {
@@ -3245,7 +3271,7 @@ function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes, car
 }
 
 function FinanceView({ financeiro, onAddFinanceiro, onEditFinanceiro, onDeleteFinanceiro, onMarcarPago,
-                        despesas, onAddDespesa, onEditDespesa, onDeleteDespesa,
+                        despesas, onAddDespesa, onEditDespesa, onDeleteDespesa, onMarcarMesPagoDespesa,
                         contas, movimentacoes, onAddConta, onDeleteConta, onAddMov, onDeleteMov, onSetPrincipal,
                         pagamentosFatura, onPagarFatura, onDesfazerPagamento,
                         cartoes, comprasCartao, onAddCartao, onDeleteCartao, onAddCompra, onEditCompra, onDeleteCompra }) {
@@ -3278,7 +3304,7 @@ function FinanceView({ financeiro, onAddFinanceiro, onEditFinanceiro, onDeleteFi
       {subTab === "negocio" && (
         <NegocioFinanceiro financeiro={financeiro} onAdd={onAddFinanceiro} onEdit={onEditFinanceiro}
                             onDelete={onDeleteFinanceiro} onMarcarPago={onMarcarPago}
-                            despesas={despesas} onAddDespesa={onAddDespesa} onEditDespesa={onEditDespesa} onDeleteDespesa={onDeleteDespesa}
+                            despesas={despesas} onAddDespesa={onAddDespesa} onEditDespesa={onEditDespesa} onDeleteDespesa={onDeleteDespesa} onMarcarMesPago={onMarcarMesPagoDespesa}
                             contas={contas} movimentacoes={movimentacoes} onAddConta={onAddConta} onDeleteConta={onDeleteConta}
                             onAddMov={onAddMov} onDeleteMov={onDeleteMov} onSetPrincipal={onSetPrincipal} />
       )}
@@ -3613,6 +3639,8 @@ function FormulariosView() {
     { titulo: "Cotação de Seguro", desc: "Monte uma cotação de qualquer ramo (auto, vida, residencial, bike, celular...) e gere o PDF pra enviar ao cliente.", arquivo: "cotacao-seguro.html", Icon: Shield, cor: COLORS.burgundy },
     { titulo: "Tabela de Certificados", desc: "Liste os certificados do cliente com CNPJ/CPF e validade (com alerta de cor pros que estão vencendo) e gere o PDF.", arquivo: "certificados-validade.html", Icon: ShieldCheck, cor: COLORS.skyBlue },
     { titulo: "Formulário do Cliente (Auto)", desc: "O link que você envia pro cliente preencher os dados da cotação de seguro auto. A resposta cai no seu WhatsApp já organizada.", arquivo: "formulario-cliente.html", Icon: FileText, cor: COLORS.green },
+    { titulo: "Formulário do Cliente (Vida)", desc: "Link pro cliente preencher os dados da cotação de seguro de vida. A resposta cai no seu WhatsApp.", arquivo: "formulario-vida.html", Icon: FileText, cor: COLORS.camelDeep },
+    { titulo: "Formulário do Cliente (Residencial)", desc: "Link pro cliente preencher os dados da cotação de seguro residencial. A resposta cai no seu WhatsApp.", arquivo: "formulario-residencial.html", Icon: FileText, cor: COLORS.slate },
   ];
   return (
     <div>
@@ -4404,9 +4432,26 @@ function App() {
     if (item.atendimentoId) await sincronizarPagamentoAtendimento(item.atendimentoId, nextFin);
   };
   const addDespesa = async (item) => {
+    // Conta fixa marcada como paga no cadastro: registra o mês de início como pago
+    if (ehDespesaFixa(item) && item.pago) item = { ...item, mesesPagos: [monthKey(item.data)] };
     setDespesas((prev) => [item, ...prev]);
     try { await apiPost("/api/despesas", item); }
     catch (e) { console.error(e); setErro("Não foi possível salvar a despesa."); }
+  };
+  // Marca/desmarca o pagamento de uma despesa NO MÊS mk (conta fixa = por mês; avulso = campo pago)
+  const marcarMesPagoDespesa = async (d, mk) => {
+    if (ehDespesaFixa(d)) {
+      const atual = d.mesesPagos || [];
+      const novo = atual.includes(mk) ? atual.filter((m) => m !== mk) : [...atual, mk];
+      setDespesas((prev) => prev.map((x) => (x.id === d.id ? { ...x, mesesPagos: novo } : x)));
+      try { await apiPatch(`/api/despesas/${d.id}`, { mesesPagos: novo }); }
+      catch (e) { console.error(e); setErro("Não foi possível atualizar o pagamento."); }
+    } else {
+      const novo = !d.pago;
+      setDespesas((prev) => prev.map((x) => (x.id === d.id ? { ...x, pago: novo } : x)));
+      try { await apiPatch(`/api/despesas/${d.id}`, { pago: novo }); }
+      catch (e) { console.error(e); setErro("Não foi possível atualizar o pagamento."); }
+    }
   };
   const editDespesa = async (item) => {
     setDespesas((prev) => prev.map((d) => (d.id === item.id ? item : d)));
@@ -4617,7 +4662,7 @@ function App() {
           <FinanceView
             financeiro={financeiro} onAddFinanceiro={addFinanceiro} onEditFinanceiro={editFinanceiro}
             onDeleteFinanceiro={deleteFinanceiro} onMarcarPago={marcarPago}
-            despesas={despesas} onAddDespesa={addDespesa} onEditDespesa={editDespesa} onDeleteDespesa={deleteDespesa}
+            despesas={despesas} onAddDespesa={addDespesa} onEditDespesa={editDespesa} onDeleteDespesa={deleteDespesa} onMarcarMesPagoDespesa={marcarMesPagoDespesa}
             contas={contas} movimentacoes={movimentacoes} onAddConta={addConta} onDeleteConta={deleteConta}
             onAddMov={addMovimentacao} onDeleteMov={deleteMovimentacao} onSetPrincipal={definirContaPrincipal}
             pagamentosFatura={pagamentosFatura} onPagarFatura={pagarFatura} onDesfazerPagamento={desfazerPagamentoFatura}

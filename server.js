@@ -539,11 +539,11 @@ app.get("/api/despesas", async (req, res) => {
 });
 
 app.post("/api/despesas", async (req, res) => {
-  const { id, titulo, tipo, valor, data, notas, forma, pago } = req.body;
+  const { id, titulo, tipo, valor, data, notas, forma, pago, mesesPagos } = req.body;
   try {
     const { rows } = await pool.query(
-      `INSERT INTO despesas (id, titulo, tipo, valor, data, notas, forma, pago) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [id, titulo, tipo, valor || 0, data, notas || null, forma || null, pago === true]
+      `INSERT INTO despesas (id, titulo, tipo, valor, data, notas, forma, pago, meses_pagos) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [id, titulo, tipo, valor || 0, data, notas || null, forma || null, pago === true, JSON.stringify(Array.isArray(mesesPagos) ? mesesPagos : [])]
     );
     res.status(201).json(rows[0]);
   } catch (e) {
@@ -561,6 +561,7 @@ app.patch("/api/despesas/:id", async (req, res) => {
     notas: req.body.notas,
     forma: req.body.forma,
     pago: req.body.pago,
+    meses_pagos: req.body.mesesPagos !== undefined ? JSON.stringify(Array.isArray(req.body.mesesPagos) ? req.body.mesesPagos : []) : undefined,
   };
   const keys = Object.keys(fields).filter((k) => fields[k] !== undefined);
   if (keys.length === 0) return res.status(400).json({ error: "Nada para atualizar" });
