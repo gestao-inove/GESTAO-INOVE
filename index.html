@@ -60,6 +60,8 @@ function Svg({ size = 16, color = "currentColor", sw = 2, children }) {
 }
 const Plus = (p) => <Svg {...p}><path d="M5 12h14"/><path d="M12 5v14"/></Svg>;
 const X = (p) => <Svg {...p}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></Svg>;
+const Paperclip = (p) => <Svg {...p}><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></Svg>;
+const Eye = (p) => <Svg {...p}><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></Svg>;
 const ChevronLeft = (p) => <Svg {...p}><path d="m15 18-6-6 6-6"/></Svg>;
 const ChevronRight = (p) => <Svg {...p}><path d="m9 18 6-6-6-6"/></Svg>;
 const ChevronDown = (p) => <Svg {...p}><path d="m6 9 6 6 6-6"/></Svg>;
@@ -190,6 +192,57 @@ function tipoDespesaInfo(key) { return TIPOS_DESPESA.find((t) => t.key === key) 
 // ====== HELPERS ======
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 function todayStr() { return new Date().toISOString().slice(0, 10); }
+// ----- Helpers de anexos (arquivos) -----
+function formatarTamanho(bytes) {
+  const b = Number(bytes) || 0;
+  if (b < 1024) return b + " B";
+  if (b < 1024 * 1024) return (b / 1024).toFixed(0) + " KB";
+  return (b / 1024 / 1024).toFixed(1).replace(".", ",") + " MB";
+}
+// Lê qualquer arquivo como Data URL (base64)
+function lerArquivoDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(fr.error || new Error("Falha ao ler o arquivo"));
+    fr.readAsDataURL(file);
+  });
+}
+// Reduz imagens grandes (mantém proporção) pra não pesar no banco. PDFs e outros passam direto.
+async function prepararArquivo(file, maxLado = 1600, qualidade = 0.82) {
+  if (!file.type || !file.type.startsWith("image/") || file.type === "image/gif") {
+    return await lerArquivoDataURL(file);
+  }
+  try {
+    const dataUrl = await lerArquivoDataURL(file);
+    const img = await new Promise((res, rej) => {
+      const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = dataUrl;
+    });
+    const maior = Math.max(img.width, img.height);
+    if (maior <= maxLado) return dataUrl; // já é pequena o bastante
+    const escala = maxLado / maior;
+    const cv = document.createElement("canvas");
+    cv.width = Math.round(img.width * escala);
+    cv.height = Math.round(img.height * escala);
+    cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+    return cv.toDataURL("image/jpeg", qualidade);
+  } catch (e) { return await lerArquivoDataURL(file); }
+}
+// Estima o tamanho em bytes de um Data URL base64
+function tamanhoDataURL(dataUrl) {
+  const i = (dataUrl || "").indexOf(",");
+  const b64 = i >= 0 ? dataUrl.slice(i + 1) : (dataUrl || "");
+  return Math.round(b64.length * 0.75);
+}
+// Converte Data URL de volta pra Blob (pra abrir/baixar)
+function dataURLparaBlob(dataUrl) {
+  const [cab, b64] = String(dataUrl || "").split(",");
+  const mime = (cab.match(/data:([^;]+)/) || [])[1] || "application/octet-stream";
+  const bin = atob(b64 || "");
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
 function fmtMoney(v) { return (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }); }
 function fmtDatePt(s) { if (!s) return ""; const [y, m, d] = s.split("-"); return `${d}/${m}/${y}`; }
 function monthKey(dateStr) { return (dateStr || todayStr()).slice(0, 7); }
@@ -521,6 +574,13 @@ function mapContato(row) {
   return {
     id: row.id, nome: row.nome || "", documento: row.documento || "",
     telefone: row.telefone || "", email: row.email || "",
+  };
+}
+function mapAnexo(row) {
+  return {
+    id: row.id, cliente: row.cliente || "", documento: row.documento || "",
+    nome: row.nome || "", legenda: row.legenda || "", tipo: row.tipo || "",
+    tamanho: row.tamanho || 0, criadoEm: row.criado_em ? String(row.criado_em) : "",
   };
 }
 
@@ -3406,7 +3466,115 @@ function EditClienteModal({ item, onClose, onSave }) {
   );
 }
 
-function ClienteProfileModal({ nome, atendimentos, financeiro, onClose }) {
+// Seção "Anexos" dentro do perfil do cliente: anexar PDF/imagem com legenda, ver, editar e excluir.
+function SecaoAnexos({ cliente, documento, anexos, onAdd, onEditarLegenda, onDelete, onVer }) {
+  const [arquivo, setArquivo] = useState(null);
+  const [legenda, setLegenda] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [erroLocal, setErroLocal] = useState("");
+  const [editId, setEditId] = useState(null);
+  const [editTxt, setEditTxt] = useState("");
+  const inputRef = React.useRef(null);
+  const LIMITE_MB = 8;
+
+  const escolher = (e) => {
+    const f = e.target.files && e.target.files[0];
+    setErroLocal("");
+    if (!f) return;
+    if (f.size > LIMITE_MB * 1024 * 1024) {
+      setErroLocal(`Arquivo muito grande (máx ${LIMITE_MB} MB). Tente uma foto menor.`);
+      setArquivo(null); if (inputRef.current) inputRef.current.value = ""; return;
+    }
+    setArquivo(f);
+  };
+
+  const enviar = async () => {
+    if (!arquivo || enviando) return;
+    setEnviando(true); setErroLocal("");
+    try {
+      const dados = await prepararArquivo(arquivo);
+      const tamanho = tamanhoDataURL(dados);
+      if (tamanho > 11 * 1024 * 1024) { setErroLocal("Ainda muito grande depois de otimizar. Tente um arquivo menor."); setEnviando(false); return; }
+      const tipo = (String(dados).match(/^data:([^;]+)/) || [])[1] || arquivo.type || "";
+      await onAdd({ id: uid(), cliente, documento: documento || "", nome: arquivo.name, legenda: legenda.trim(), tipo, tamanho, dados });
+      setArquivo(null); setLegenda(""); if (inputRef.current) inputRef.current.value = "";
+    } catch (e) {
+      console.error(e); setErroLocal("Não foi possível enviar. Verifique a conexão ou tente um arquivo menor.");
+    } finally { setEnviando(false); }
+  };
+
+  const ehImagem = (t) => (t || "").startsWith("image/");
+  const salvarLegenda = (id) => { onEditarLegenda(id, editTxt.trim()); setEditId(null); setEditTxt(""); };
+  const lista = anexos || [];
+
+  return (
+    <div className="mt-4">
+      <div className="flex items-center gap-1.5 mb-2">
+        <Paperclip size={14} color={COLORS.burgundy} />
+        <span className="text-xs font-semibold" style={{ color: COLORS.burgundy }}>Anexos ({lista.length})</span>
+      </div>
+
+      <div className="rounded-lg p-3 mb-2" style={{ backgroundColor: "#F1F3F6" }}>
+        <input ref={inputRef} type="file" accept="image/*,application/pdf" onChange={escolher} style={{ display: "none" }} />
+        <button onClick={() => inputRef.current && inputRef.current.click()}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium mb-2"
+                style={{ backgroundColor: "#fff", border: `1px dashed ${COLORS.line}`, color: COLORS.inkSoft }}>
+          <Upload size={13} color={COLORS.inkSoft} /> {arquivo ? arquivo.name : "Escolher PDF ou imagem"}
+        </button>
+        <input value={legenda} onChange={(e) => setLegenda(e.target.value)}
+               placeholder="Legenda (ex: CNH, apólice, comprovante...)"
+               className="w-full px-2.5 py-2 rounded-lg text-xs mb-2"
+               style={{ border: `1px solid ${COLORS.line}`, color: COLORS.ink }} />
+        {erroLocal && <p className="text-[11px] mb-2" style={{ color: COLORS.red }}>{erroLocal}</p>}
+        <button onClick={enviar} disabled={!arquivo || enviando}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold"
+                style={{ backgroundColor: (!arquivo || enviando) ? COLORS.line : COLORS.burgundy, color: (!arquivo || enviando) ? COLORS.inkSoft : "#fff" }}>
+          <Paperclip size={13} color={(!arquivo || enviando) ? COLORS.inkSoft : "#fff"} /> {enviando ? "Enviando..." : "Anexar"}
+        </button>
+      </div>
+
+      {lista.length === 0 && (
+        <p className="text-xs py-3 text-center rounded-lg" style={{ color: COLORS.inkSoft, backgroundColor: "#F1F3F6" }}>Nenhum arquivo anexado ainda.</p>
+      )}
+      <div className="space-y-2">
+        {lista.map((ax) => (
+          <div key={ax.id} className="rounded-lg p-2.5 flex items-start gap-2" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
+            <div className="mt-0.5 flex-shrink-0">
+              {ehImagem(ax.tipo) ? <Eye size={16} color={COLORS.slate} /> : <FileText size={16} color={COLORS.slate} />}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-medium truncate" style={{ color: COLORS.ink }}>{ax.nome}</div>
+              {editId === ax.id ? (
+                <div className="flex items-center gap-1 mt-1">
+                  <input value={editTxt} onChange={(e) => setEditTxt(e.target.value)} autoFocus
+                         className="flex-1 px-2 py-1 rounded text-[11px]" style={{ border: `1px solid ${COLORS.line}` }} />
+                  <button onClick={() => salvarLegenda(ax.id)} className="text-[11px] font-semibold px-1.5" style={{ color: COLORS.green }}>OK</button>
+                  <button onClick={() => { setEditId(null); setEditTxt(""); }} className="text-[11px] px-1" style={{ color: COLORS.inkSoft }}>✕</button>
+                </div>
+              ) : (
+                <div className="text-[11px] mt-0.5" style={{ color: COLORS.inkSoft }}>
+                  {ax.legenda ? ax.legenda : <span className="italic">sem legenda</span>}
+                  <button onClick={() => { setEditId(ax.id); setEditTxt(ax.legenda || ""); }} className="ml-1.5 underline">editar</button>
+                </div>
+              )}
+              <div className="text-[10px] mt-0.5" style={{ color: COLORS.inkSoft }}>{formatarTamanho(ax.tamanho)}</div>
+            </div>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <button onClick={() => onVer(ax.id)} title="Abrir" className="p-1.5 rounded-md hover:bg-black/5">
+                <Download size={14} color={COLORS.slate} />
+              </button>
+              <button onClick={() => { if (window.confirm(`Excluir "${ax.nome}"?`)) onDelete(ax.id); }} title="Excluir" className="p-1.5 rounded-md hover:bg-black/5">
+                <Trash2 size={14} color={COLORS.red} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ClienteProfileModal({ nome, atendimentos, financeiro, anexos, onAddAnexo, onEditarLegendaAnexo, onDeleteAnexo, onVerAnexo, onClose }) {
   const n = normalizarNome(nome);
   const contato = acharContato(nome, "");
   const produtos = (atendimentos || [])
@@ -3418,6 +3586,8 @@ function ClienteProfileModal({ nome, atendimentos, financeiro, onClose }) {
   const tel = (contato && contato.telefone) || getTelefone(nome);
   const email = contato && contato.email;
   const doc = contato && contato.documento;
+  const anexosCliente = (anexos || []).filter((ax) =>
+    normalizarNome(ax.cliente) === n || (doc && ax.documento && soDigitos(ax.documento) === soDigitos(doc)));
 
   const LinhaDado = ({ rotulo, valor }) => (
     <div className="flex items-center justify-between py-1 text-xs">
@@ -3483,11 +3653,21 @@ function ClienteProfileModal({ nome, atendimentos, financeiro, onClose }) {
           </div>
         ))}
       </div>
+
+      <SecaoAnexos
+        cliente={nome}
+        documento={doc || ""}
+        anexos={anexosCliente}
+        onAdd={onAddAnexo}
+        onEditarLegenda={onEditarLegendaAnexo}
+        onDelete={onDeleteAnexo}
+        onVer={onVerAnexo}
+      />
     </Modal>
   );
 }
 
-function ClientesView({ clientes, atendimentos, financeiro, onAdd, onEdit, onDelete }) {
+function ClientesView({ clientes, atendimentos, financeiro, anexos, onAddAnexo, onEditarLegendaAnexo, onDeleteAnexo, onVerAnexo, onAdd, onEdit, onDelete }) {
   const [subTab, setSubTab] = useState("certificado");
   const [showAdd, setShowAdd] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
@@ -3588,7 +3768,9 @@ function ClientesView({ clientes, atendimentos, financeiro, onAdd, onEdit, onDel
 
       {showAdd && <AddClienteModal categoriaFixa={subTab} onClose={() => setShowAdd(false)} onSave={onAdd} />}
       {editingItem && <EditClienteModal item={editingItem} onClose={() => setEditingItem(null)} onSave={onEdit} />}
-      {perfil && <ClienteProfileModal nome={perfil} atendimentos={atendimentos} financeiro={financeiro} onClose={() => setPerfil(null)} />}
+      {perfil && <ClienteProfileModal nome={perfil} atendimentos={atendimentos} financeiro={financeiro}
+        anexos={anexos} onAddAnexo={onAddAnexo} onEditarLegendaAnexo={onEditarLegendaAnexo}
+        onDeleteAnexo={onDeleteAnexo} onVerAnexo={onVerAnexo} onClose={() => setPerfil(null)} />}
     </div>
   );
 }
@@ -4018,6 +4200,7 @@ function App() {
   const [contas, setContas] = useState([]);
   const [movimentacoes, setMovimentacoes] = useState([]);
   const [pagamentosFatura, setPagamentosFatura] = useState([]);
+  const [anexos, setAnexos] = useState([]);
   const [mesKanban, setMesKanban] = useState(monthKey(todayStr()));
   const [showBackup, setShowBackup] = useState(false);
 
@@ -4105,7 +4288,7 @@ function App() {
   const carregarTudo = async () => {
     setLoading(true); setErro("");
     try {
-      const [a, ag, f, d, ct, cc, cl, cn, mv, pf, cont] = await Promise.all([
+      const [a, ag, f, d, ct, cc, cl, cn, mv, pf, cont, anx] = await Promise.all([
         apiGet("/api/atendimentos"), apiGet("/api/agendamentos"), apiGet("/api/financeiro"),
         apiGet("/api/despesas").catch(() => []),
         apiGet("/api/cartoes").catch(() => []),
@@ -4115,6 +4298,7 @@ function App() {
         apiGet("/api/movimentacoes").catch(() => []),
         apiGet("/api/pagamentos-fatura").catch(() => []),
         apiGet("/api/contatos").catch(() => []),
+        apiGet("/api/anexos").catch(() => []),
       ]);
       const ats = a.map(mapAtendimento);
       const cls = cl.map(mapCliente);
@@ -4132,6 +4316,7 @@ function App() {
       setContas(cn.map(mapConta));
       setMovimentacoes(mv.map(mapMovimentacao));
       setPagamentosFatura(pf.map(mapPagamentoFatura));
+      setAnexos((anx || []).map(mapAnexo));
       await sincronizarClientesEmitidos(ats, cls);
       await semearContatos(ats, cls, conts);
       await limparFinanceiroNaoFechado(ats, fins);
@@ -4568,6 +4753,35 @@ function App() {
     try { await apiDelete(`/api/movimentacoes/${id}`); }
     catch (e) { console.error(e); setErro("Não foi possível excluir a movimentação."); }
   };
+  // ----- Anexos dos clientes -----
+  const addAnexo = async (item) => {
+    const salvo = await apiPost("/api/anexos", item); // pode lançar erro (arquivo grande demais)
+    setAnexos((prev) => [mapAnexo(salvo), ...prev]);
+  };
+  const editarLegendaAnexo = async (id, legenda) => {
+    setAnexos((prev) => prev.map((x) => (x.id === id ? { ...x, legenda } : x)));
+    try { await apiPatch(`/api/anexos/${id}`, { legenda }); }
+    catch (e) { console.error(e); setErro("Não foi possível salvar a legenda."); }
+  };
+  const deleteAnexo = async (id) => {
+    setAnexos((prev) => prev.filter((x) => x.id !== id));
+    try { await apiDelete(`/api/anexos/${id}`); }
+    catch (e) { console.error(e); setErro("Não foi possível excluir o anexo."); }
+  };
+  // Busca o arquivo completo só na hora de abrir e mostra numa nova aba
+  const verAnexo = async (id) => {
+    const win = window.open("", "_blank");
+    try {
+      const full = await apiGet(`/api/anexos/${id}`);
+      const blob = dataURLparaBlob(full.dados);
+      const url = URL.createObjectURL(blob);
+      if (win) win.location.href = url; else window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) {
+      if (win) win.close();
+      console.error(e); setErro("Não foi possível abrir o anexo.");
+    }
+  };
 
   const tabs = [
     { key: "dashboard", label: "Dashboard", icon: LayoutGrid },
@@ -4680,7 +4894,10 @@ function App() {
           />
         )}
         {tab === "clientes" && (
-          <ClientesView clientes={clientes} atendimentos={atendimentos} financeiro={financeiro} onAdd={addCliente} onEdit={editCliente} onDelete={deleteCliente} />
+          <ClientesView clientes={clientes} atendimentos={atendimentos} financeiro={financeiro}
+            anexos={anexos} onAddAnexo={addAnexo} onEditarLegendaAnexo={editarLegendaAnexo}
+            onDeleteAnexo={deleteAnexo} onVerAnexo={verAnexo}
+            onAdd={addCliente} onEdit={editCliente} onDelete={deleteCliente} />
         )}
         {tab === "formularios" && <FormulariosView />}
       </div>

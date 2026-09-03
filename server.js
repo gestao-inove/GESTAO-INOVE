@@ -4,7 +4,7 @@ const { Pool } = require("pg");
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "12mb" })); // permite anexos (arquivos em base64)
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -302,6 +302,78 @@ app.delete("/api/contatos/:id", async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Erro ao excluir contato" });
+  }
+});
+
+// ---------- ANEXOS (arquivos dos clientes) ----------
+// Lista só os metadados (sem o conteúdo do arquivo, pra ficar leve)
+app.get("/api/anexos", async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, cliente, documento, nome, legenda, tipo, tamanho, criado_em
+       FROM anexos ORDER BY criado_em DESC`
+    );
+    res.json(rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao buscar anexos" });
+  }
+});
+
+// Retorna UM anexo completo (com o conteúdo em base64) — só quando for visualizar/baixar
+app.get("/api/anexos/:id", async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM anexos WHERE id = $1", [req.params.id]);
+    if (rows.length === 0) return res.status(404).json({ error: "Anexo não encontrado" });
+    res.json(rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao buscar anexo" });
+  }
+});
+
+app.post("/api/anexos", async (req, res) => {
+  const { id, cliente, documento, nome, legenda, tipo, tamanho, dados } = req.body;
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO anexos (id, cliente, documento, nome, legenda, tipo, tamanho, dados)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, cliente, documento, nome, legenda, tipo, tamanho, criado_em`,
+      [id, cliente || null, documento || null, nome || null, legenda || null, tipo || null, tamanho || null, dados || null]
+    );
+    res.status(201).json(rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao salvar anexo" });
+  }
+});
+
+app.patch("/api/anexos/:id", async (req, res) => {
+  const fields = { cliente: req.body.cliente, legenda: req.body.legenda };
+  const keys = Object.keys(fields).filter((k) => fields[k] !== undefined);
+  if (keys.length === 0) return res.status(400).json({ error: "Nada para atualizar" });
+  const setClause = keys.map((k, i) => `${k} = $${i + 1}`).join(", ");
+  const values = keys.map((k) => fields[k]);
+  values.push(req.params.id);
+  try {
+    const { rows } = await pool.query(
+      `UPDATE anexos SET ${setClause} WHERE id = $${values.length}
+       RETURNING id, cliente, documento, nome, legenda, tipo, tamanho, criado_em`,
+      values
+    );
+    res.json(rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao atualizar anexo" });
+  }
+});
+
+app.delete("/api/anexos/:id", async (req, res) => {
+  try {
+    await pool.query("DELETE FROM anexos WHERE id = $1", [req.params.id]);
+    res.status(204).end();
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao excluir anexo" });
   }
 });
 
