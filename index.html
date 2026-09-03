@@ -807,21 +807,34 @@ function AtendimentoForm({ item, onSubmit, submitLabel, comissaoInicial, categor
         </Field>
       </div>
 
-      <div className="rounded-lg p-3 mb-3" style={{ backgroundColor: "#F1F3F6" }}>
-        <div className="flex items-center gap-1.5 mb-2">
-          <CalendarPlus size={14} color={COLORS.camelDeep} />
-          <span className="text-xs font-semibold" style={{ color: COLORS.camelDeep }}>Agendamento{item ? "" : " (opcional)"}</span>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Data">
+      {categoria === "seguro" ? (
+        <div className="rounded-lg p-3 mb-3" style={{ backgroundColor: "#F1F3F6" }}>
+          <div className="flex items-center gap-1.5 mb-2">
+            <CalendarPlus size={14} color={COLORS.camelDeep} />
+            <span className="text-xs font-semibold" style={{ color: COLORS.camelDeep }}>Início da Vigência{item ? "" : " (opcional)"}</span>
+          </div>
+          <Field label="Data de início da vigência">
             <input type="date" style={inputStyle} value={dataAgendamento} onChange={(e) => setDataAgendamento(e.target.value)} />
           </Field>
-          <Field label="Horário">
-            <input type="time" style={inputStyle} value={horarioAgendamento} onChange={(e) => setHorarioAgendamento(e.target.value)} />
-          </Field>
+          <p className="text-[11px]" style={{ color: COLORS.inkSoft }}>A renovação na aba Clientes é contada a partir dessa data (1 ano depois).</p>
         </div>
-        <p className="text-[11px]" style={{ color: COLORS.inkSoft }}>Preenchendo data e horário, o compromisso vai {item ? "atualizado" : ""} automaticamente para o calendário.</p>
-      </div>
+      ) : (
+        <div className="rounded-lg p-3 mb-3" style={{ backgroundColor: "#F1F3F6" }}>
+          <div className="flex items-center gap-1.5 mb-2">
+            <CalendarPlus size={14} color={COLORS.camelDeep} />
+            <span className="text-xs font-semibold" style={{ color: COLORS.camelDeep }}>Agendamento{item ? "" : " (opcional)"}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Data">
+              <input type="date" style={inputStyle} value={dataAgendamento} onChange={(e) => setDataAgendamento(e.target.value)} />
+            </Field>
+            <Field label="Horário">
+              <input type="time" style={inputStyle} value={horarioAgendamento} onChange={(e) => setHorarioAgendamento(e.target.value)} />
+            </Field>
+          </div>
+          <p className="text-[11px]" style={{ color: COLORS.inkSoft }}>Preenchendo data e horário, o compromisso vai {item ? "atualizado" : ""} automaticamente para o calendário.</p>
+        </div>
+      )}
 
       {categoria === "seguro" && (
         <div className="rounded-lg p-3 mb-3" style={{ backgroundColor: "#F1F3F6" }}>
@@ -1029,7 +1042,7 @@ function AtendimentoCard({ item, onMove, onDelete, onEdit, comissaoPct }) {
       })()}
       {item.dataAgendamento && (
         <div className="flex items-center gap-1 text-xs mb-1" style={{ color: COLORS.camelDeep }}>
-          <CalendarPlus size={12} color={COLORS.camelDeep} /> Agendado {fmtDatePt(item.dataAgendamento)}{item.horarioAgendamento ? ` às ${item.horarioAgendamento}` : ""}
+          <CalendarPlus size={12} color={COLORS.camelDeep} /> {item.categoria === "seguro" ? "Vigência inicia" : "Agendado"} {fmtDatePt(item.dataAgendamento)}{item.categoria !== "seguro" && item.horarioAgendamento ? ` às ${item.horarioAgendamento}` : ""}
         </div>
       )}
       {item.valor != null && item.valor > 0 && (
@@ -3648,7 +3661,7 @@ function ClienteProfileModal({ nome, atendimentos, financeiro, anexos, onAddAnex
             </div>
             <div className="text-[11px]" style={{ color: COLORS.inkSoft }}>
               Solicitado em {fmtDatePt(a.dataSolicitacao || (a.criadoEm || "").slice(0, 10))}
-              {a.dataAgendamento ? ` · Agendado ${fmtDatePt(a.dataAgendamento)}` : ""}
+              {a.dataAgendamento ? ` · ${a.categoria === "seguro" ? "Vigência" : "Agendado"} ${fmtDatePt(a.dataAgendamento)}` : ""}
             </div>
           </div>
         ))}
@@ -4429,6 +4442,14 @@ function App() {
           setFinanceiro((prev) => [lanc, ...prev]);
           await apiPost("/api/financeiro", lanc);
         }
+        // Já entrou como venda fechada: registra o cliente (no seguro, início = vigência)
+        if (!clientes.some((c) => c.atendimentoId === item.id)) {
+          const inicio = (item.categoria === "seguro" && item.dataAgendamento) ? item.dataAgendamento : todayStr();
+          const novoCliente = { id: uid(), nome: item.cliente, categoria: item.categoria, subtipo: item.subtipo,
+                                dataInicio: inicio, notas: "", atendimentoId: item.id };
+          setClientes((prev) => [...prev, novoCliente]);
+          await apiPost("/api/clientes", novoCliente);
+        }
       }
     } catch (e) { console.error(e); setErro("Não foi possível salvar o atendimento no servidor."); }
   };
@@ -4450,6 +4471,15 @@ function App() {
           const novo = { id: uid(), ...dadosAg, atendimentoId: item.id };
           setAgendamentos((prev) => [...prev, novo]);
           await apiPost("/api/agendamentos", novo);
+        }
+      }
+
+      // No seguro, mantém o início da vigência do cliente igual ao do atendimento (pra renovação certa)
+      if (item.categoria === "seguro" && item.dataAgendamento) {
+        const cli = clientes.find((c) => c.atendimentoId === item.id);
+        if (cli && cli.dataInicio !== item.dataAgendamento) {
+          setClientes((prev) => prev.map((c) => (c.id === cli.id ? { ...c, dataInicio: item.dataAgendamento } : c)));
+          try { await apiPatch(`/api/clientes/${cli.id}`, { dataInicio: item.dataAgendamento }); } catch (e) { console.error(e); }
         }
       }
 
@@ -4534,9 +4564,11 @@ function App() {
       if (item && concluiuVenda(item.categoria, status)) {
         const jaTemCliente = clientes.some((c) => c.atendimentoId === id);
         if (!jaTemCliente) {
+          // No seguro, a vigência (item.dataAgendamento) define o início pra contar a renovação.
+          const inicio = (item.categoria === "seguro" && item.dataAgendamento) ? item.dataAgendamento : todayStr();
           const novoCliente = {
             id: uid(), nome: item.cliente, categoria: item.categoria, subtipo: item.subtipo,
-            dataInicio: todayStr(), notas: "", atendimentoId: id,
+            dataInicio: inicio, notas: "", atendimentoId: id,
           };
           setClientes((prev) => [...prev, novoCliente]);
           await apiPost("/api/clientes", novoCliente);
