@@ -508,6 +508,12 @@ function parseMesesPagos(v) {
   if (!v) return [];
   try { const a = JSON.parse(v); return Array.isArray(a) ? a : []; } catch (e) { return []; }
 }
+// Datas em que cada mês foi PAGO (mapa "YYYY-MM" -> "YYYY-MM-DD"). Serve p/ o gasto entrar no extrato na data do pagamento.
+function parseDatasPagas(v) {
+  if (v && typeof v === "object" && !Array.isArray(v)) return v;
+  if (!v) return {};
+  try { const o = JSON.parse(v); return (o && typeof o === "object" && !Array.isArray(o)) ? o : {}; } catch (e) { return {}; }
+}
 function ehDespesaFixa(d) { return d && (d.tipo === "fixa" || d.tipo === "negocio_fixa"); }
 // Está paga no mês mk? Conta fixa: olha a lista de meses pagos. Avulso: usa o campo pago (é uma ocorrência só).
 function despesaPagaNoMes(d, mk) {
@@ -522,6 +528,7 @@ function mapDespesa(row) {
     notas: row.notas || "", forma: row.forma || "",
     pago: row.pago === true,
     mesesPagos: parseMesesPagos(row.meses_pagos),
+    datasPagas: parseDatasPagas(row.datas_pagas),
   };
 }
 function mapCartao(row) {
@@ -1597,6 +1604,7 @@ function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
   const [recebimentosAberto, setRecebimentosAberto] = useState(true);
   const [gastosAberto, setGastosAberto] = useState(true);
   const [atrasadosAberto, setAtrasadosAberto] = useState(true);
+  const [pagandoMes, setPagandoMes] = useState(null); // { d, mk } quando está escolhendo a data do pagamento
 
   // Regime de caixa: o recebido conta no mês da baixa (data do lançamento já pago).
   // O pendente aparece no mês da DATA PREVISTA DE RECEBIMENTO (campo "data" do lançamento).
@@ -1936,7 +1944,8 @@ function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
             </div>
             <div className="text-sm font-bold flex-shrink-0" style={{ color: COLORS.red, fontFamily: "ui-monospace, monospace" }}>− {fmtMoney(d.valor)}</div>
             {onMarcarMesPago && (
-              <button onClick={() => onMarcarMesPago(d, refMes)} className="px-2 py-1 rounded-lg text-[10px] font-bold flex-shrink-0 whitespace-nowrap"
+              <button onClick={() => pagaNoMes ? onMarcarMesPago(d, refMes, null) : setPagandoMes({ d, mk: refMes })}
+                      className="px-2 py-1 rounded-lg text-[10px] font-bold flex-shrink-0 whitespace-nowrap"
                       style={pagaNoMes
                         ? { backgroundColor: COLORS.green + "1A", color: COLORS.green }
                         : { backgroundColor: "#F1F3F6", color: COLORS.inkSoft, border: `1px solid ${COLORS.line}` }}
@@ -1973,7 +1982,30 @@ function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
       {editingItem && <EditFinanceModal item={editingItem} onClose={() => setEditingItem(null)} onSave={onEdit} />}
       {showAddGasto && <AddGastoNegocioModal onClose={() => setShowAddGasto(false)} onSave={onAddDespesa} />}
       {editingGasto && <EditGastoNegocioModal item={editingGasto} onClose={() => setEditingGasto(null)} onSave={onEditDespesa} />}
+      {pagandoMes && (
+        <MarcarPagoDataModal despesa={pagandoMes.d} mk={pagandoMes.mk}
+          onClose={() => setPagandoMes(null)}
+          onConfirmar={(data) => { onMarcarMesPago(pagandoMes.d, pagandoMes.mk, data); setPagandoMes(null); }} />
+      )}
     </div>
+  );
+}
+
+// Pergunta a data em que o gasto foi pago (pra ele entrar no extrato nessa data, não no vencimento)
+function MarcarPagoDataModal({ despesa, mk, onClose, onConfirmar }) {
+  const [data, setData] = useState(todayStr());
+  return (
+    <Modal title="Data do pagamento" onClose={onClose}>
+      <p className="text-xs mb-3" style={{ color: COLORS.inkSoft }}>
+        Quando você pagou <b>{despesa.titulo}</b>{despesa.tipo === "negocio_fixa" ? ` (${monthLabelShort(mk)})` : ""}? O gasto vai aparecer no extrato nessa data.
+      </p>
+      <Field label="Paguei no dia">
+        <input type="date" style={inputStyle} value={data} onChange={(e) => setData(e.target.value)} autoFocus />
+      </Field>
+      <button onClick={() => onConfirmar(data || todayStr())} className="w-full mt-2 py-2.5 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: COLORS.green }}>
+        Confirmar pagamento
+      </button>
+    </Modal>
   );
 }
 
@@ -1986,6 +2018,10 @@ function DespesaForm({ item, tipoInicial, onSubmit, submitLabel }) {
   const [forma, setForma] = useState(item && item.forma ? item.forma : FORMAS_DESPESA[0]);
   const [notas, setNotas] = useState(item ? item.notas : "");
   const [pago, setPago] = useState(item ? !!item.pago : false);
+  const mkItem = item && item.data ? monthKey(item.data) : "";
+  const [dataPagamento, setDataPagamento] = useState(
+    (item && item.datasPagas && mkItem && item.datasPagas[mkItem]) || (item && item.data) || todayStr()
+  );
 
   const submit = () => {
     if (!titulo.trim() || !valor) return;
@@ -1996,7 +2032,7 @@ function DespesaForm({ item, tipoInicial, onSubmit, submitLabel }) {
       const mesBase = item && item.data ? monthKey(item.data) : monthKey(todayStr());
       dataFinal = mesBase + "-" + String(diaN).padStart(2, "0");
     }
-    onSubmit({ titulo: titulo.trim(), tipo, valor: parseFloat(valor) || 0, data: dataFinal, forma, notas: notas.trim(), pago });
+    onSubmit({ titulo: titulo.trim(), tipo, valor: parseFloat(valor) || 0, data: dataFinal, forma, notas: notas.trim(), pago, dataPagamento });
   };
 
   return (
@@ -2039,6 +2075,12 @@ function DespesaForm({ item, tipoInicial, onSubmit, submitLabel }) {
                 : "Pendente: sai da conta automaticamente quando a data chegar.")}
         </p>
       </Field>
+      {pago && (
+        <Field label="Data do pagamento">
+          <input type="date" style={inputStyle} value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} />
+          <p className="text-[11px] mt-1" style={{ color: COLORS.inkSoft }}>O gasto entra no extrato da conta nesta data.</p>
+        </Field>
+      )}
       <Field label="Como foi paga">
         <select style={inputStyle} value={forma} onChange={(e) => setForma(e.target.value)}>
           {FORMAS_DESPESA.map((f) => <option key={f} value={f}>{f}</option>)}
@@ -2700,8 +2742,10 @@ function fluxoNegocioConta(financeiro, despesas) {
     if (d.tipo === "negocio_avulso") {
       // Abate quando a data já chegou OU quando você marcou como Pago (pagou antes)
       if (d.pago || (d.data || "") <= hoje) {
+        // Se está pago e você informou a data do pagamento, o gasto entra nessa data (não no vencimento)
+        const dataMov = (d.pago && d.datasPagas && d.datasPagas[monthKey(d.data)]) || d.data;
         movs.push({ id: "auto-gasto-" + d.id, auto: true, tipo: "saida", valor: d.valor || 0,
-                    descricao: "Gasto · " + d.titulo, data: d.data, origem: "despesa", origemId: d.id });
+                    descricao: "Gasto · " + d.titulo, data: dataMov, origem: "despesa", origemId: d.id });
       }
     } else if (d.tipo === "negocio_fixa") {
       // Conta fixa recorre todo mês. Abate as datas que já passaram; se marcada Pago, abate também a do mês atual antes da data.
@@ -2711,8 +2755,10 @@ function fluxoNegocioConta(financeiro, despesas) {
       while (mk <= mesAtual && guard < 240) {
         const dataOcorrencia = mk + "-" + dia;
         if (dataOcorrencia <= hoje || (d.mesesPagos || []).includes(mk)) {
+          // Se esse mês foi pago e você informou a data, entra na data do pagamento (senão, no vencimento)
+          const dataMov = (d.datasPagas && d.datasPagas[mk]) || dataOcorrencia;
           movs.push({ id: "auto-fix-" + d.id + "-" + mk, auto: true, tipo: "saida", valor: d.valor || 0,
-                      descricao: "Conta fixa · " + d.titulo, data: dataOcorrencia, origem: "despesa", origemId: d.id });
+                      descricao: "Conta fixa · " + d.titulo, data: dataMov, origem: "despesa", origemId: d.id });
         }
         mk = addMonths(mk, 1); guard++;
       }
@@ -2885,14 +2931,16 @@ function ContasView({ contas, movimentacoes, onAddConta, onDeleteConta, onAddMov
                       <ChevronRight size={16} color={COLORS.inkSoft} />
                     </button>
                   </div>
-                  <div className="flex items-center justify-between text-[11px] py-1.5 px-2 rounded-lg mb-1" style={{ backgroundColor: "#F1F3F6", color: COLORS.inkSoft }}>
-                    <span>Saldo no início do mês</span>
-                    <span style={{ fontFamily: "ui-monospace, monospace", color: extrato.saldoInicioMes < 0 ? COLORS.red : COLORS.ink }}>{fmtMoney(extrato.saldoInicioMes)}</span>
-                  </div>
+                  {extrato.dias.length > 0 && (
+                    <div className="flex items-center justify-between text-[11px] py-1.5 px-2 rounded-lg mb-1" style={{ backgroundColor: COLORS.burgundy + "0F", color: COLORS.burgundy }}>
+                      <span className="font-semibold">Saldo no fim do mês</span>
+                      <span className="font-bold" style={{ fontFamily: "ui-monospace, monospace" }}>{fmtMoney(extrato.saldoFinalMes)}</span>
+                    </div>
+                  )}
 
                   {extrato.dias.length === 0 && <p className="text-[11px] py-3 text-center" style={{ color: COLORS.inkSoft }}>Nenhuma movimentação neste mês</p>}
 
-                  {extrato.dias.map((g) => (
+                  {[...extrato.dias].reverse().map((g) => (
                     <div key={g.dia}>
                       <div className="flex items-center justify-between mt-2.5 mb-0.5 px-1">
                         <span className="text-[11px] font-bold" style={{ color: COLORS.burgundy }}>{fmtDatePt(g.dia)}</span>
@@ -2934,9 +2982,9 @@ function ContasView({ contas, movimentacoes, onAddConta, onDeleteConta, onAddMov
                   ))}
 
                   {extrato.dias.length > 0 && (
-                    <div className="flex items-center justify-between text-[11px] py-1.5 px-2 rounded-lg mt-1.5" style={{ backgroundColor: COLORS.burgundy + "0F", color: COLORS.burgundy }}>
-                      <span className="font-semibold">Saldo no fim do mês</span>
-                      <span className="font-bold" style={{ fontFamily: "ui-monospace, monospace" }}>{fmtMoney(extrato.saldoFinalMes)}</span>
+                    <div className="flex items-center justify-between text-[11px] py-1.5 px-2 rounded-lg mt-1.5" style={{ backgroundColor: "#F1F3F6", color: COLORS.inkSoft }}>
+                      <span>Saldo no início do mês</span>
+                      <span style={{ fontFamily: "ui-monospace, monospace", color: extrato.saldoInicioMes < 0 ? COLORS.red : COLORS.ink }}>{fmtMoney(extrato.saldoInicioMes)}</span>
                     </div>
                   )}
                 </div>
@@ -4719,28 +4767,44 @@ function App() {
     if (item.atendimentoId) await sincronizarPagamentoAtendimento(item.atendimentoId, nextFin);
   };
   const addDespesa = async (item) => {
-    // Conta fixa marcada como paga no cadastro: registra o mês de início como pago
-    if (ehDespesaFixa(item) && item.pago) item = { ...item, mesesPagos: [monthKey(item.data)] };
+    const mkInicio = monthKey(item.data);
+    const dtPag = item.dataPagamento || item.data; // data que ela informou como paga (ou o vencimento)
+    // Conta fixa marcada como paga no cadastro: registra o mês de início como pago (com a data)
+    if (ehDespesaFixa(item) && item.pago) item = { ...item, mesesPagos: [mkInicio], datasPagas: { [mkInicio]: dtPag } };
+    // Gasto avulso já pago: guarda a data do pagamento pra entrar no extrato nessa data
+    else if (!ehDespesaFixa(item) && item.pago) item = { ...item, datasPagas: { [mkInicio]: dtPag } };
     setDespesas((prev) => [item, ...prev]);
     try { await apiPost("/api/despesas", item); }
     catch (e) { console.error(e); setErro("Não foi possível salvar a despesa."); }
   };
-  // Marca/desmarca o pagamento de uma despesa NO MÊS mk (conta fixa = por mês; avulso = campo pago)
-  const marcarMesPagoDespesa = async (d, mk) => {
+  // Marca/desmarca o pagamento de uma despesa NO MÊS mk, guardando a DATA do pagamento (dataPag).
+  const marcarMesPagoDespesa = async (d, mk, dataPag) => {
     if (ehDespesaFixa(d)) {
       const atual = d.mesesPagos || [];
-      const novo = atual.includes(mk) ? atual.filter((m) => m !== mk) : [...atual, mk];
-      setDespesas((prev) => prev.map((x) => (x.id === d.id ? { ...x, mesesPagos: novo } : x)));
-      try { await apiPatch(`/api/despesas/${d.id}`, { mesesPagos: novo }); }
+      const marcando = !atual.includes(mk);
+      const novo = marcando ? [...atual, mk] : atual.filter((m) => m !== mk);
+      const datas = { ...(d.datasPagas || {}) };
+      if (marcando) datas[mk] = dataPag || todayStr(); else delete datas[mk];
+      setDespesas((prev) => prev.map((x) => (x.id === d.id ? { ...x, mesesPagos: novo, datasPagas: datas } : x)));
+      try { await apiPatch(`/api/despesas/${d.id}`, { mesesPagos: novo, datasPagas: datas }); }
       catch (e) { console.error(e); setErro("Não foi possível atualizar o pagamento."); }
     } else {
-      const novo = !d.pago;
-      setDespesas((prev) => prev.map((x) => (x.id === d.id ? { ...x, pago: novo } : x)));
-      try { await apiPatch(`/api/despesas/${d.id}`, { pago: novo }); }
+      const marcando = !d.pago;
+      const chave = monthKey(d.data);
+      const datas = { ...(d.datasPagas || {}) };
+      if (marcando) datas[chave] = dataPag || todayStr(); else delete datas[chave];
+      setDespesas((prev) => prev.map((x) => (x.id === d.id ? { ...x, pago: marcando, datasPagas: datas } : x)));
+      try { await apiPatch(`/api/despesas/${d.id}`, { pago: marcando, datasPagas: datas }); }
       catch (e) { console.error(e); setErro("Não foi possível atualizar o pagamento."); }
     }
   };
   const editDespesa = async (item) => {
+    // Avulso: reflete a data do pagamento informada (ou limpa se voltou a pendente)
+    if (!ehDespesaFixa(item)) {
+      const mk = monthKey(item.data);
+      if (item.pago) item = { ...item, datasPagas: { ...(item.datasPagas || {}), [mk]: item.dataPagamento || (item.datasPagas && item.datasPagas[mk]) || item.data } };
+      else item = { ...item, datasPagas: {} };
+    }
     setDespesas((prev) => prev.map((d) => (d.id === item.id ? item : d)));
     try { await apiPatch(`/api/despesas/${item.id}`, item); }
     catch (e) { console.error(e); setErro("Não foi possível salvar as alterações."); }
