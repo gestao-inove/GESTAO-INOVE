@@ -2646,6 +2646,36 @@ function saldoDaConta(conta, movimentacoes, fluxoNegocio) {
   }
   return saldo;
 }
+// Efeito de um lançamento no saldo (+ entrada, − saída)
+function efeitoMov(m) { return m.tipo === "saida" ? -(m.valor || 0) : (m.valor || 0); }
+// Monta o extrato de UM mês, no estilo banco: cada dia com saldo inicial (= saldo final do dia anterior),
+// lançamentos em ordem cronológica (pela ordem em que foram lançados) e saldo corrente após cada um.
+function montarExtratoMensal(conta, movimentacoes, fluxoNegocio, mk) {
+  const manuais = (movimentacoes || []).filter((m) => m.contaId === conta.id);
+  const autos = conta.principal ? (fluxoNegocio || []) : [];
+  // Ordena por data e, dentro do mesmo dia, pela ordem de lançamento (o id começa com o horário)
+  const ordenados = [...manuais, ...autos].sort((a, b) => {
+    const d = String(a.data || "").localeCompare(String(b.data || ""));
+    return d !== 0 ? d : String(a.id || "").localeCompare(String(b.id || ""));
+  });
+  // Saldo acumulado até o fim do mês anterior (base do primeiro saldo inicial do mês)
+  let saldoInicioMes = (conta.saldoInicial || 0);
+  ordenados.forEach((m) => { if (monthKey(m.data) < mk) saldoInicioMes += efeitoMov(m); });
+  const doMes = ordenados.filter((m) => monthKey(m.data) === mk);
+  // Agrupa por dia, calculando saldo inicial de cada dia e o saldo corrente após cada lançamento
+  const dias = [];
+  let saldo = saldoInicioMes;
+  let grupo = null;
+  doMes.forEach((m) => {
+    if (!grupo || grupo.dia !== m.data) {
+      grupo = { dia: m.data, saldoInicial: saldo, itens: [] };
+      dias.push(grupo);
+    }
+    saldo += efeitoMov(m);
+    grupo.itens.push({ ...m, saldoApos: saldo });
+  });
+  return { dias, saldoInicioMes, saldoFinalMes: saldo };
+}
 
 // Lançamentos automáticos da conta do negócio: recebimentos (entradas) e gastos da empresa (saídas).
 // São calculados, não salvos — então nunca duplicam e somem se você apagar o recebimento/gasto.
@@ -2758,6 +2788,7 @@ function ContasView({ contas, movimentacoes, onAddConta, onDeleteConta, onAddMov
   const [showAddConta, setShowAddConta] = useState(false);
   const [movDaConta, setMovDaConta] = useState(null);
   const [aberta, setAberta] = useState(null);
+  const [mesExtrato, setMesExtrato] = useState(monthKey(todayStr())); // mês mostrado no extrato
   const [acaoLanc, setAcaoLanc] = useState(null); // id do lançamento com as opções abertas
   const [editandoMov, setEditandoMov] = useState(null); // { mov, conta }
   const podeDesignar = tipo === "pj" && typeof onSetPrincipal === "function";
@@ -2797,8 +2828,9 @@ function ContasView({ contas, movimentacoes, onAddConta, onDeleteConta, onAddMov
           const saldo = saldoDaConta(c, movimentacoes, fluxoNegocio);
           const manuais = movimentacoes.filter((m) => m.contaId === c.id);
           const autos = c.principal ? (fluxoNegocio || []) : [];
-          const movs = [...manuais, ...autos].sort((a, b) => (b.data || "").localeCompare(a.data || ""));
+          const movs = [...manuais, ...autos];
           const estaAberta = aberta === c.id;
+          const extrato = estaAberta ? montarExtratoMensal(c, movimentacoes, fluxoNegocio, mesExtrato) : null;
           return (
             <div key={c.id} className="rounded-lg" style={{ backgroundColor: COLORS.panel,
                  border: c.principal ? `1.5px solid ${COLORS.camel}` : `1px solid ${COLORS.line}` }}>
@@ -2843,41 +2875,70 @@ function ContasView({ contas, movimentacoes, onAddConta, onDeleteConta, onAddMov
                       Recebimentos e gastos da empresa entram aqui sozinhos (marcados como "auto").
                     </p>
                   )}
-                  <div className="flex items-center justify-between text-[11px] py-1.5 px-2 rounded-lg mb-1" style={{ backgroundColor: "#F1F3F6", color: COLORS.inkSoft }}>
-                    <span>Saldo inicial</span>
-                    <span style={{ fontFamily: "ui-monospace, monospace" }}>{fmtMoney(c.saldoInicial)}</span>
+                  {/* Seletor de mês (extrato como o do banco) */}
+                  <div className="flex items-center justify-between mb-2">
+                    <button onClick={() => setMesExtrato(addMonths(mesExtrato, -1))} className="p-1.5 rounded-lg hover:bg-black/5" title="Mês anterior">
+                      <ChevronLeft size={16} color={COLORS.inkSoft} />
+                    </button>
+                    <span className="text-xs font-semibold capitalize" style={{ color: COLORS.ink }}>{monthLabelShort(mesExtrato)}</span>
+                    <button onClick={() => setMesExtrato(addMonths(mesExtrato, 1))} className="p-1.5 rounded-lg hover:bg-black/5" title="Próximo mês">
+                      <ChevronRight size={16} color={COLORS.inkSoft} />
+                    </button>
                   </div>
-                  {movs.length === 0 && <p className="text-[11px] py-2 text-center" style={{ color: COLORS.inkSoft }}>Nenhuma movimentação ainda</p>}
-                  {movs.map((m) => {
-                    const ativo = acaoLanc === m.id;
-                    return (
-                    <div key={m.id} style={{ borderTop: `1px dashed ${COLORS.line}` }}>
-                      <div className="flex items-center gap-2 text-xs py-1.5">
-                        <button onClick={() => setAcaoLanc(ativo ? null : m.id)} className="flex-1 min-w-0 truncate text-left hover:underline" style={{ color: COLORS.ink }} title="Toque para editar ou excluir">
-                          {m.descricao || (m.tipo === "entrada" ? "Entrada" : "Saída")}
-                          {m.auto && <span className="ml-1 px-1 py-0.5 rounded text-[9px] font-bold" style={{ backgroundColor: COLORS.line, color: COLORS.inkSoft }}>auto</span>}
-                          <span style={{ color: COLORS.inkSoft }}> · {fmtDatePt(m.data)}</span>
-                        </button>
-                        <span className="font-bold flex-shrink-0" style={{ color: m.tipo === "entrada" ? COLORS.green : COLORS.red, fontFamily: "ui-monospace, monospace" }}>
-                          {m.tipo === "entrada" ? "+" : "−"} {fmtMoney(m.valor)}
-                        </span>
+                  <div className="flex items-center justify-between text-[11px] py-1.5 px-2 rounded-lg mb-1" style={{ backgroundColor: "#F1F3F6", color: COLORS.inkSoft }}>
+                    <span>Saldo no início do mês</span>
+                    <span style={{ fontFamily: "ui-monospace, monospace", color: extrato.saldoInicioMes < 0 ? COLORS.red : COLORS.ink }}>{fmtMoney(extrato.saldoInicioMes)}</span>
+                  </div>
+
+                  {extrato.dias.length === 0 && <p className="text-[11px] py-3 text-center" style={{ color: COLORS.inkSoft }}>Nenhuma movimentação neste mês</p>}
+
+                  {extrato.dias.map((g) => (
+                    <div key={g.dia}>
+                      <div className="flex items-center justify-between mt-2.5 mb-0.5 px-1">
+                        <span className="text-[11px] font-bold" style={{ color: COLORS.burgundy }}>{fmtDatePt(g.dia)}</span>
+                        <span className="text-[10px]" style={{ color: COLORS.inkSoft }}>Saldo inicial <b style={{ fontFamily: "ui-monospace, monospace" }}>{fmtMoney(g.saldoInicial)}</b></span>
                       </div>
-                      {ativo && (
-                        <div className="flex items-center gap-1.5 pb-2 pl-1 flex-wrap">
-                          <button onClick={() => { setAcaoLanc(null); if (m.auto) { if (onEditarAuto) onEditarAuto(m); } else { setEditandoMov({ mov: m, conta: c }); } }}
-                                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold" style={{ backgroundColor: COLORS.burgundy + "12", color: COLORS.burgundy }}>
-                            <PenLine size={12} color={COLORS.burgundy} /> Editar
-                          </button>
-                          <button onClick={() => { setAcaoLanc(null); if (m.auto) { if (onExcluirAuto) onExcluirAuto(m); } else { onDeleteMov(m.id); } }}
-                                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold" style={{ backgroundColor: COLORS.red + "14", color: COLORS.red }}>
-                            <Trash2 size={12} color={COLORS.red} /> Excluir
-                          </button>
-                          {m.auto && <span className="text-[10px]" style={{ color: COLORS.inkSoft }}>mexe no recebimento/gasto de origem</span>}
+                      {g.itens.map((m) => {
+                        const ativo = acaoLanc === m.id;
+                        return (
+                        <div key={m.id} style={{ borderTop: `1px dashed ${COLORS.line}` }}>
+                          <div className="flex items-center gap-2 text-xs py-1.5">
+                            <button onClick={() => setAcaoLanc(ativo ? null : m.id)} className="flex-1 min-w-0 truncate text-left hover:underline" style={{ color: COLORS.ink }} title="Toque para editar ou excluir">
+                              {m.descricao || (m.tipo === "entrada" ? "Entrada" : "Saída")}
+                              {m.auto && <span className="ml-1 px-1 py-0.5 rounded text-[9px] font-bold" style={{ backgroundColor: COLORS.line, color: COLORS.inkSoft }}>auto</span>}
+                            </button>
+                            <div className="flex-shrink-0 text-right leading-tight">
+                              <div className="font-bold" style={{ color: m.tipo === "entrada" ? COLORS.green : COLORS.red, fontFamily: "ui-monospace, monospace" }}>
+                                {m.tipo === "entrada" ? "+" : "−"} {fmtMoney(m.valor)}
+                              </div>
+                              <div className="text-[10px]" style={{ color: m.saldoApos < 0 ? COLORS.red : COLORS.inkSoft, fontFamily: "ui-monospace, monospace" }}>saldo {fmtMoney(m.saldoApos)}</div>
+                            </div>
+                          </div>
+                          {ativo && (
+                            <div className="flex items-center gap-1.5 pb-2 pl-1 flex-wrap">
+                              <button onClick={() => { setAcaoLanc(null); if (m.auto) { if (onEditarAuto) onEditarAuto(m); } else { setEditandoMov({ mov: m, conta: c }); } }}
+                                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold" style={{ backgroundColor: COLORS.burgundy + "12", color: COLORS.burgundy }}>
+                                <PenLine size={12} color={COLORS.burgundy} /> Editar
+                              </button>
+                              <button onClick={() => { setAcaoLanc(null); if (m.auto) { if (onExcluirAuto) onExcluirAuto(m); } else { onDeleteMov(m.id); } }}
+                                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold" style={{ backgroundColor: COLORS.red + "14", color: COLORS.red }}>
+                                <Trash2 size={12} color={COLORS.red} /> Excluir
+                              </button>
+                              {m.auto && <span className="text-[10px]" style={{ color: COLORS.inkSoft }}>mexe no recebimento/gasto de origem</span>}
+                            </div>
+                          )}
                         </div>
-                      )}
+                        );
+                      })}
                     </div>
-                    );
-                  })}
+                  ))}
+
+                  {extrato.dias.length > 0 && (
+                    <div className="flex items-center justify-between text-[11px] py-1.5 px-2 rounded-lg mt-1.5" style={{ backgroundColor: COLORS.burgundy + "0F", color: COLORS.burgundy }}>
+                      <span className="font-semibold">Saldo no fim do mês</span>
+                      <span className="font-bold" style={{ fontFamily: "ui-monospace, monospace" }}>{fmtMoney(extrato.saldoFinalMes)}</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
