@@ -450,12 +450,14 @@ function mapAtendimento(row) {
     dataSolicitacao: row.data_solicitacao ? String(row.data_solicitacao).slice(0, 10) : "",
     dataAgendamento: row.data_agendamento ? String(row.data_agendamento).slice(0, 10) : "",
     horarioAgendamento: row.horario_agendamento || "",
+    previsaoRecebimento: row.previsao_recebimento ? String(row.previsao_recebimento).slice(0, 10) : "",
     valor: row.valor != null ? parseFloat(row.valor) : null,
     custo: row.custo != null ? parseFloat(row.custo) : null,
     documento: row.documento || "",
     comissao: row.comissao != null ? parseFloat(row.comissao) : null,
     seguradora: row.seguradora || "",
     pagamento: row.pagamento || "",
+    forma: row.forma || "",
     status: row.status, notas: row.notas || "", criadoEm: row.criado_em,
   };
 }
@@ -741,6 +743,8 @@ function AtendimentoForm({ item, onSubmit, submitLabel, comissaoInicial, categor
   const [pagamento, setPagamento] = useState(item && item.pagamento ? item.pagamento : "pago");
   const [parcelasComissao, setParcelasComissao] = useState(item && item.parcelasComissao ? String(item.parcelasComissao) : "1");
   const [forma, setForma] = useState(item && item.forma ? item.forma : FORMAS_PAGAMENTO[0]);
+  // Certificado: quando o cliente ainda vai pagar (ex: boleto pra 30 dias), a previsão de quando o dinheiro cai
+  const [previsaoRecebimento, setPrevisaoRecebimento] = useState(item && item.previsaoRecebimento ? item.previsaoRecebimento : "");
   const [notas, setNotas] = useState(item ? item.notas : "");
   // Seguradora: se não estiver na lista, cai no campo livre ("Outra")
   const seguradoraSalva = item && item.seguradora ? item.seguradora : "";
@@ -770,7 +774,9 @@ function AtendimentoForm({ item, onSubmit, submitLabel, comissaoInicial, categor
         ? (seguradora === "__outra__" ? seguradoraOutra.trim() : seguradora)
         : "",
       pagamento: valor ? pagamento : "",
-      forma: valor && pagamento === "pago" ? forma : "",
+      // A forma vale também quando está pendente (boleto, pix...), pra você saber como vai receber
+      forma: valor ? forma : "",
+      previsaoRecebimento: (categoria === "certificado" && valor && pagamento === "pendente") ? (previsaoRecebimento || "") : "",
       notas: notas.trim(),
     });
   };
@@ -944,11 +950,18 @@ function AtendimentoForm({ item, onSubmit, submitLabel, comissaoInicial, categor
                   <Toggle ativo={pagamento === "pendente"} cor={COLORS.camelDeep} onClick={() => setPagamento("pendente")}>Pendente</Toggle>
                 </div>
               </Field>
-              {pagamento === "pago" && (
-                <Field label="Forma de pagamento">
-                  <select style={inputStyle} value={forma} onChange={(e) => setForma(e.target.value)}>
-                    {FORMAS_PAGAMENTO.map((f) => <option key={f} value={f}>{f}</option>)}
-                  </select>
+              <Field label={pagamento === "pago" ? "Forma de pagamento" : "Forma de recebimento"}>
+                <select style={inputStyle} value={forma} onChange={(e) => setForma(e.target.value)}>
+                  {FORMAS_PAGAMENTO.map((f) => <option key={f} value={f}>{f}</option>)}
+                </select>
+              </Field>
+              {pagamento === "pendente" && (
+                <Field label="Previsão de recebimento">
+                  <input type="date" style={inputStyle} value={previsaoRecebimento}
+                         onChange={(e) => setPrevisaoRecebimento(e.target.value)} />
+                  <p className="text-[11px] mt-1" style={{ color: COLORS.inkSoft }}>
+                    Quando o dinheiro deve cair (ex: vencimento do boleto). No dia, aparece um alerta no Dashboard pra você confirmar.
+                  </p>
                 </Field>
               )}
               <p className="text-[11px]" style={{ color: COLORS.inkSoft }}>
@@ -3986,7 +3999,69 @@ function FormulariosView() {
 }
 
 // ====== DASHBOARD (tela inicial) ======
-function DashboardView({ atendimentos, clientes, financeiro, agendamentos, despesas, contas, movimentacoes, cartoes, comprasCartao, pagamentosFatura, onIr }) {
+// Alerta de recebimento: certificados cuja previsão já chegou e ainda não foram recebidos.
+// "Ainda não" adia só por hoje — amanhã o alerta volta, até você confirmar.
+// Seguros ficam de fora de propósito (as seguradoras pagam em datas aleatórias).
+function AlertaRecebimento({ financeiro, onMarcarPago }) {
+  const hoje = todayStr();
+  const [adiados, setAdiados] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("recebAdiados") || "{}") || {}; } catch (e) { return {}; }
+  });
+  const adiar = (id) => {
+    const novo = { ...adiados, [id]: hoje };
+    setAdiados(novo);
+    try { localStorage.setItem("recebAdiados", JSON.stringify(novo)); } catch (e) {}
+  };
+  const aReceber = (financeiro || [])
+    .filter((f) => f.categoria === "certificado" && !f.pago && f.data && f.data <= hoje && adiados[f.id] !== hoje)
+    .sort((a, b) => String(a.data).localeCompare(String(b.data)));
+  if (aReceber.length === 0) return null;
+  const total = aReceber.reduce((s, f) => s + (f.valorPago || 0), 0);
+
+  return (
+    <div className="rounded-lg mb-4 overflow-hidden" style={{ border: `1.5px solid ${COLORS.green}`, backgroundColor: "#fff" }}>
+      <div className="flex items-center gap-2 px-3 py-2.5" style={{ backgroundColor: COLORS.green + "1A" }}>
+        <Bell size={16} color={COLORS.green} />
+        <span className="text-sm font-bold" style={{ color: COLORS.green }}>
+          Hora de receber · {aReceber.length} ({fmtMoney(total)})
+        </span>
+      </div>
+      <div className="px-3">
+        {aReceber.map((f) => (
+          <div key={f.id} className="py-2.5" style={{ borderTop: `1px dashed ${COLORS.line}` }}>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold truncate" style={{ color: COLORS.ink }}>{f.cliente}</div>
+                <div className="text-[11px]" style={{ color: f.data === hoje ? COLORS.inkSoft : COLORS.red }}>
+                  {f.forma ? f.forma + " · " : ""}
+                  {f.data === hoje ? "recebimento hoje" : `previsto em ${fmtDatePt(f.data)}`}
+                </div>
+              </div>
+              <div className="text-sm font-bold flex-shrink-0" style={{ color: COLORS.green, fontFamily: "ui-monospace, monospace" }}>
+                {fmtMoney(f.valorPago)}
+              </div>
+            </div>
+            <div className="flex gap-2 mt-2">
+              <button onClick={() => onMarcarPago(f.id)}
+                      className="flex-1 py-1.5 rounded-lg text-[11px] font-bold text-white"
+                      style={{ backgroundColor: COLORS.green }}>
+                Confirmar recebimento
+              </button>
+              <button onClick={() => adiar(f.id)}
+                      className="px-3 py-1.5 rounded-lg text-[11px] font-semibold"
+                      style={{ backgroundColor: "#F1F3F6", color: COLORS.inkSoft }}
+                      title="Some hoje e volta amanhã">
+                Ainda não
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DashboardView({ atendimentos, clientes, financeiro, agendamentos, despesas, contas, movimentacoes, cartoes, comprasCartao, pagamentosFatura, onMarcarPago, onIr }) {
   const mk = monthKey(todayStr());
   const hoje = todayStr();
   const receitaMes = financeiro.filter((f) => f.pago && monthKey(f.data) === mk).reduce((s, f) => s + (f.valorPago || 0), 0);
@@ -4019,6 +4094,8 @@ function DashboardView({ atendimentos, clientes, financeiro, agendamentos, despe
     <div>
       <h2 className="text-lg font-semibold" style={{ color: COLORS.ink, letterSpacing: "-0.2px" }}>Dashboard</h2>
       <p className="text-xs mb-4 capitalize" style={{ color: COLORS.inkSoft }}>{hojeExtenso()}</p>
+
+      <AlertaRecebimento financeiro={financeiro} onMarcarPago={onMarcarPago} />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         {tiles.map((t, i) => (
@@ -4547,7 +4624,7 @@ function App() {
         } else if (item.categoria === "certificado" && (item.valor || 0) > 0) {
           const lanc = { id: uid(), cliente: item.cliente, categoria: item.categoria, subtipo: item.subtipo,
                          valorPago: item.valor, custo: item.custo || 0, forma: item.forma || "",
-                         data: item.dataAgendamento || todayStr(), pago: item.pagamento !== "pendente",
+                         data: item.previsaoRecebimento || item.dataAgendamento || todayStr(), pago: item.pagamento !== "pendente",
                          atendimentoId: item.id };
           setFinanceiro((prev) => [lanc, ...prev]);
           await apiPost("/api/financeiro", lanc);
@@ -4618,7 +4695,7 @@ function App() {
         if (fechada && (item.valor || 0) > 0) {
           const dadosF = { cliente: item.cliente, categoria: item.categoria, subtipo: item.subtipo,
                            valorPago: item.valor, custo: item.custo || 0, forma: item.forma || "",
-                           data: item.dataAgendamento || (existenteF ? existenteF.data : todayStr()),
+                           data: item.previsaoRecebimento || item.dataAgendamento || (existenteF ? existenteF.data : todayStr()),
                            pago: item.pagamento !== "pendente" };
           if (existenteF) {
             setFinanceiro((prev) => prev.map((f) => (f.id === existenteF.id ? { ...f, ...dadosF } : f)));
@@ -4655,7 +4732,7 @@ function App() {
             const novoLanc = {
               id: uid(), cliente: item.cliente, categoria: item.categoria, subtipo: item.subtipo,
               valorPago: item.valor, custo: item.custo || 0, forma: item.forma || "",
-              data: item.dataAgendamento || todayStr(), pago: item.pagamento !== "pendente",
+              data: item.previsaoRecebimento || item.dataAgendamento || todayStr(), pago: item.pagamento !== "pendente",
               atendimentoId: id,
             };
             setFinanceiro((prev) => [novoLanc, ...prev]);
@@ -5036,7 +5113,7 @@ function App() {
             <button onClick={carregarTudo} className="font-semibold underline flex-shrink-0">Tentar de novo</button>
           </div>
         )}
-        {tab === "dashboard" && <DashboardView atendimentos={atendimentos} clientes={clientes} financeiro={financeiro} agendamentos={agendamentos} despesas={despesas} contas={contas} movimentacoes={movimentacoes} cartoes={cartoes} comprasCartao={comprasCartao} pagamentosFatura={pagamentosFatura} onIr={setTab} />}
+        {tab === "dashboard" && <DashboardView atendimentos={atendimentos} clientes={clientes} financeiro={financeiro} agendamentos={agendamentos} despesas={despesas} contas={contas} movimentacoes={movimentacoes} cartoes={cartoes} comprasCartao={comprasCartao} pagamentosFatura={pagamentosFatura} onMarcarPago={marcarPago} onIr={setTab} />}
         {tab === "kanban" && <KanbanBoard atendimentos={atendimentos} onAdd={addAtendimento} onMove={moveAtendimento} onDelete={deleteAtendimento} onEdit={editAtendimento} clientes={clientes} mesKanban={mesKanban} financeiro={financeiro} />}
         {tab === "calendario" && <CalendarView agendamentos={agendamentos} onAdd={addAgendamento} onDelete={deleteAgendamento} />}
         {tab === "financeiro" && (

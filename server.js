@@ -186,12 +186,12 @@ app.get("/api/atendimentos", async (req, res) => {
 });
 
 app.post("/api/atendimentos", async (req, res) => {
-  const { id, cliente, categoria, subtipo, horarioSolicitado, dataSolicitacao, dataAgendamento, horarioAgendamento, valor, custo, documento, comissao, seguradora, pagamento, status, notas } = req.body;
+  const { id, cliente, categoria, subtipo, horarioSolicitado, dataSolicitacao, dataAgendamento, horarioAgendamento, valor, custo, documento, comissao, seguradora, pagamento, status, notas, forma, previsaoRecebimento } = req.body;
   try {
     const { rows } = await pool.query(
-      `INSERT INTO atendimentos (id, cliente, categoria, subtipo, horario_solicitado, data_solicitacao, data_agendamento, horario_agendamento, valor, custo, documento, comissao, seguradora, pagamento, status, notas)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
-      [id, cliente, categoria, subtipo, horarioSolicitado || null, dataSolicitacao || null, dataAgendamento || null, horarioAgendamento || null, valor != null ? valor : null, custo != null ? custo : null, documento || null, comissao != null ? comissao : null, seguradora || null, pagamento || null, status || "iniciado", notas || null]
+      `INSERT INTO atendimentos (id, cliente, categoria, subtipo, horario_solicitado, data_solicitacao, data_agendamento, horario_agendamento, valor, custo, documento, comissao, seguradora, pagamento, status, notas, forma, previsao_recebimento)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
+      [id, cliente, categoria, subtipo, horarioSolicitado || null, dataSolicitacao || null, dataAgendamento || null, horarioAgendamento || null, valor != null ? valor : null, custo != null ? custo : null, documento || null, comissao != null ? comissao : null, seguradora || null, pagamento || null, status || "iniciado", notas || null, forma || null, previsaoRecebimento || null]
     );
     res.status(201).json(rows[0]);
   } catch (e) {
@@ -215,6 +215,8 @@ app.patch("/api/atendimentos/:id", async (req, res) => {
     comissao: req.body.comissao != null ? req.body.comissao : undefined,
     seguradora: req.body.seguradora,
     pagamento: req.body.pagamento,
+    forma: req.body.forma,
+    previsao_recebimento: req.body.previsaoRecebimento !== undefined ? (req.body.previsaoRecebimento || null) : undefined,
     status: req.body.status,
     notas: req.body.notas,
   };
