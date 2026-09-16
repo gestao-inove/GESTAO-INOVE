@@ -42,6 +42,13 @@
 
   /* linhas de cobertura no formulário */
   .cobHead,.cobRow{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:6px;align-items:center}
+  .segBloco{padding:10px 0;border-top:1px dashed var(--line)}
+  .segBloco:first-child{border-top:0;padding-top:0}
+  .segBtns{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .mini{padding:8px 12px;border-radius:9px;border:1px solid var(--navy);background:var(--navy);color:#fff;
+        font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit}
+  .mini.ghost{background:#fff;color:var(--inkSoft);border-color:var(--line)}
+  .mini[disabled]{opacity:.4;cursor:not-allowed}
   .cobHead{margin-bottom:5px}
   .cobHead span{font-size:10px;font-weight:700;color:var(--inkSoft);text-transform:uppercase;letter-spacing:.3px}
   .cobRow{margin-bottom:6px}
@@ -144,56 +151,21 @@
 
     <fieldset>
       <legend>Seguradoras</legend>
-      <label>Opção 1</label>
-      <select id="s1" class="seg"></select>
-      <input id="outra1" placeholder="Nome da seguradora" style="display:none;margin-top:6px">
-      <label>Opção 2</label>
-      <select id="s2" class="seg"></select>
-      <input id="outra2" placeholder="Nome da seguradora" style="display:none;margin-top:6px">
+      <div id="segCampos"></div>
+      <div class="segBtns">
+        <button type="button" class="mini" id="btnAddSeg" onclick="addOpcao()">+ Adicionar seguradora</button>
+        <button type="button" class="mini ghost" id="btnRemSeg" onclick="remOpcao()">− Remover a última</button>
+      </div>
     </fieldset>
 
     <fieldset>
       <legend>Coberturas</legend>
-      <div class="cobHead"><span>Cobertura</span><span>Opção 1</span><span>Opção 2</span></div>
+      <div class="cobHead" id="cobHead"></div>
       <div id="cobRows"></div>
       <p class="hint" style="margin-top:2px">Deixe uma linha em branco (sem nome) para não aparecer no PDF.</p>
     </fieldset>
 
-    <fieldset>
-      <legend>Valores — Opção 1</legend>
-      <div class="row2">
-        <div><label>Valor total (R$)</label><input id="pre1" placeholder="2.400,00"></div>
-        <div><label>Nº de parcelas</label><input id="npar1" type="number" min="1" max="24" placeholder="10"></div>
-      </div>
-      <label>Valor da parcela (R$) — só se tiver juros</label>
-      <input id="vpar1" placeholder="deixe vazio para calcular sozinho">
-      <div class="calc" id="calc1">Preencha o valor total e o nº de parcelas</div>
-      <label>Formas de pagamento</label>
-      <div class="formas">
-        <div class="chk"><input type="checkbox" id="fc1"><label for="fc1">Cartão</label></div>
-        <div class="chk"><input type="checkbox" id="fb1"><label for="fb1">Boleto</label></div>
-        <div class="chk"><input type="checkbox" id="fd1"><label for="fd1">Débito em conta</label></div>
-      </div>
-      <div class="chk" style="margin-top:10px"><input type="checkbox" id="rec1"><label for="rec1">Marcar como recomendada</label></div>
-    </fieldset>
-
-    <fieldset>
-      <legend>Valores — Opção 2</legend>
-      <div class="row2">
-        <div><label>Valor total (R$)</label><input id="pre2" placeholder="2.850,00"></div>
-        <div><label>Nº de parcelas</label><input id="npar2" type="number" min="1" max="24" placeholder="12"></div>
-      </div>
-      <label>Valor da parcela (R$) — só se tiver juros</label>
-      <input id="vpar2" placeholder="deixe vazio para calcular sozinho">
-      <div class="calc" id="calc2">Preencha o valor total e o nº de parcelas</div>
-      <label>Formas de pagamento</label>
-      <div class="formas">
-        <div class="chk"><input type="checkbox" id="fc2"><label for="fc2">Cartão</label></div>
-        <div class="chk"><input type="checkbox" id="fb2"><label for="fb2">Boleto</label></div>
-        <div class="chk"><input type="checkbox" id="fd2"><label for="fd2">Débito em conta</label></div>
-      </div>
-      <div class="chk" style="margin-top:10px"><input type="checkbox" id="rec2"><label for="rec2">Marcar como recomendada</label></div>
-    </fieldset>
+    <div id="valoresBlocos"></div>
 
     <div class="btns">
       <button class="btn btn-main" onclick="window.print()">Gerar PDF</button>
@@ -226,33 +198,12 @@
 
     <table>
       <thead>
-        <tr>
-          <th>Coberturas</th>
-          <th class="col"><span class="segNome" id="oS1">Opção 1</span><span class="selo" id="oR1" style="display:none">RECOMENDADA</span></th>
-          <th class="col"><span class="segNome" id="oS2">Opção 2</span><span class="selo" id="oR2" style="display:none">RECOMENDADA</span></th>
-        </tr>
+        <tr id="oCabec"></tr>
       </thead>
       <tbody id="oCob"></tbody>
     </table>
 
-    <div class="precos">
-      <div class="preco" id="oBox1">
-        <div class="s" id="oPs1">Opção 1</div>
-        <div class="lab">Valor total</div>
-        <div class="val" id="oPre1">—</div>
-        <div class="par" id="oPar1"></div>
-        <div class="jur" id="oJur1"></div>
-        <div class="fp" id="oFp1" style="display:none"></div>
-      </div>
-      <div class="preco" id="oBox2">
-        <div class="s" id="oPs2">Opção 2</div>
-        <div class="lab">Valor total</div>
-        <div class="val" id="oPre2">—</div>
-        <div class="par" id="oPar2"></div>
-        <div class="jur" id="oJur2"></div>
-        <div class="fp" id="oFp2" style="display:none"></div>
-      </div>
-    </div>
+    <div class="precos" id="oPrecos"></div>
 
     <div class="aviso">Proposta sujeita à análise e aceitação da seguradora. Coberturas, limites e condições
     conforme as cláusulas contratuais da apólice.</div>
@@ -339,6 +290,8 @@ var RAMOS = {
 };
 
 var NLINHAS = 12; // linhas de cobertura disponíveis no formulário
+var MAXOPC = 4;   // no máximo 4 seguradoras (mais que isso não cabe legível no A4)
+var NOPCOES = 2;  // quantas seguradoras estão em uso agora
 var ramoAtual = "auto";
 
 function el(id){return document.getElementById(id)}
@@ -365,12 +318,97 @@ function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").rep
 function nomeSeguradora(i){ var s = val("s"+i); return s === "__outra__" ? (val("outra"+i) || "Outra seguradora") : s; }
 function formasDe(i){ var f=[]; if(val("fc"+i))f.push("Cartão de crédito"); if(val("fb"+i))f.push("Boleto"); if(val("fd"+i))f.push("Débito em conta"); return f; }
 
-// Monta os selects de seguradora
-document.querySelectorAll("select.seg").forEach(function(sel,i){
-  sel.innerHTML = SEGURADORAS.map(function(s){return '<option>'+esc(s)+'</option>'}).join("")
-                + '<option value="__outra__">Outra (digitar)</option>';
-  sel.selectedIndex = i === 0 ? 0 : 1;
-});
+// ---------- Seguradoras em quantidade variável (1 a MAXOPC) ----------
+function opcoesSelect(){
+  return SEGURADORAS.map(function(s){return '<option>'+esc(s)+'</option>'}).join("")
+       + '<option value="__outra__">Outra (digitar)</option>';
+}
+// Blocos de escolha das seguradoras (formulário)
+function montarSeg(){
+  var html = "";
+  for(var i=1;i<=NOPCOES;i++){
+    html += '<div class="segBloco">'
+          + '<label>Opção '+i+'</label>'
+          + '<select id="s'+i+'" class="seg">'+opcoesSelect()+'</select>'
+          + '<input id="outra'+i+'" placeholder="Nome da seguradora" style="display:none;margin-top:6px">'
+          + '</div>';
+  }
+  el("segCampos").innerHTML = html;
+  for(var j=1;j<=NOPCOES;j++){
+    var sel = el("s"+j);
+    if(sel) sel.selectedIndex = Math.min(j-1, SEGURADORAS.length-1);
+  }
+  el("btnAddSeg").disabled = NOPCOES >= MAXOPC;
+  el("btnRemSeg").disabled = NOPCOES <= 1;
+}
+// Um bloco de valores por seguradora (formulário)
+function montarValores(){
+  var html = "";
+  for(var i=1;i<=NOPCOES;i++){
+    html += '<fieldset>'
+      + '<legend>Valores — Opção '+i+'</legend>'
+      + '<div class="row2">'
+      +   '<div><label>Valor total (R$)</label><input id="pre'+i+'" placeholder="2.400,00"></div>'
+      +   '<div><label>Nº de parcelas</label><input id="npar'+i+'" type="number" min="1" max="24" placeholder="10"></div>'
+      + '</div>'
+      + '<label>Valor da parcela (R$) — só se tiver juros</label>'
+      + '<input id="vpar'+i+'" placeholder="deixe vazio para calcular sozinho">'
+      + '<div class="calc" id="calc'+i+'">Preencha o valor total e o nº de parcelas</div>'
+      + '<label>Formas de pagamento</label>'
+      + '<div class="formas">'
+      +   '<div class="chk"><input type="checkbox" id="fc'+i+'"><label for="fc'+i+'">Cartão</label></div>'
+      +   '<div class="chk"><input type="checkbox" id="fb'+i+'"><label for="fb'+i+'">Boleto</label></div>'
+      +   '<div class="chk"><input type="checkbox" id="fd'+i+'"><label for="fd'+i+'">Débito em conta</label></div>'
+      + '</div>'
+      + '<div class="chk" style="margin-top:10px"><input type="checkbox" id="rec'+i+'"><label for="rec'+i+'">Marcar como recomendada</label></div>'
+      + '</fieldset>';
+  }
+  el("valoresBlocos").innerHTML = html;
+}
+// Cabeçalho da tabela e caixas de preço da PÁGINA (o que vira PDF)
+function montarSaida(){
+  var th = '<th>Coberturas</th>';
+  for(var i=1;i<=NOPCOES;i++){
+    th += '<th class="col"><span class="segNome" id="oS'+i+'">Opção '+i+'</span>'
+        + '<span class="selo" id="oR'+i+'" style="display:none">RECOMENDADA</span></th>';
+  }
+  el("oCabec").innerHTML = th;
+
+  var bx = "";
+  for(var j=1;j<=NOPCOES;j++){
+    bx += '<div class="preco" id="oBox'+j+'">'
+        + '<div class="s" id="oPs'+j+'">Opção '+j+'</div>'
+        + '<div class="lab">Valor total</div>'
+        + '<div class="val" id="oPre'+j+'">—</div>'
+        + '<div class="par" id="oPar'+j+'"></div>'
+        + '<div class="jur" id="oJur'+j+'"></div>'
+        + '<div class="fp" id="oFp'+j+'" style="display:none"></div>'
+        + '</div>';
+  }
+  el("oPrecos").innerHTML = bx;
+
+  // Ajustes pra caber no A4 quando tem 3 ou 4 seguradoras
+  var larg = NOPCOES >= 3 ? Math.floor(60/NOPCOES) : 29;
+  document.querySelectorAll("#paper th.col").forEach(function(t){ t.style.width = larg + "%"; });
+  var fonte = NOPCOES >= 4 ? "10.5px" : (NOPCOES === 3 ? "11.5px" : "12.5px");
+  document.querySelectorAll("#paper table th, #paper table td").forEach(function(c){ c.style.fontSize = fonte; });
+  el("oPrecos").style.gridTemplateColumns = NOPCOES === 1 ? "1fr" : (NOPCOES === 3 ? "1fr 1fr 1fr" : "1fr 1fr");
+  var tamVal = NOPCOES >= 3 ? "20px" : "30px";
+  document.querySelectorAll("#oPrecos .val").forEach(function(v){ v.style.fontSize = tamVal; });
+}
+// Refaz tudo preservando o que já estava digitado
+function remontar(){
+  var d = coletar();
+  montarSeg(); montarValores(); montarCobRows(); montarSaida();
+  aplicar(d);
+  render();
+}
+function addOpcao(){ if(NOPCOES >= MAXOPC) return; NOPCOES++; remontar(); }
+function remOpcao(){
+  if(NOPCOES <= 1) return;
+  if(!confirm("Remover a Opção " + NOPCOES + "? Os dados dela serão apagados.")) return;
+  NOPCOES--; remontar();
+}
 
 // Constrói os campos de "dados" (formulário) e o grid de saída conforme o ramo
 function montarDados(){
@@ -388,13 +426,18 @@ function montarDados(){
 
 // Constrói as linhas de cobertura (formulário)
 function montarCobRows(){
+  var cols = "1.3fr" + Array(NOPCOES + 1).join(" 1fr");
+  var h = '<span>Cobertura</span>';
+  for(var k=1;k<=NOPCOES;k++) h += '<span>Opção '+k+'</span>';
+  el("cobHead").innerHTML = h;
+  el("cobHead").style.gridTemplateColumns = cols;
+
   var html = "";
   for(var i=0;i<NLINHAS;i++){
-    html += '<div class="cobRow">'
-          + '<input class="nome" id="cn_'+i+'" placeholder="Cobertura">'
-          + '<input id="c1_'+i+'" placeholder="Opção 1">'
-          + '<input id="c2_'+i+'" placeholder="Opção 2">'
-          + '</div>';
+    html += '<div class="cobRow" style="grid-template-columns:'+cols+'">'
+          + '<input class="nome" id="cn_'+i+'" placeholder="Cobertura">';
+    for(var j=1;j<=NOPCOES;j++) html += '<input id="c'+j+'_'+i+'" placeholder="Opção '+j+'">';
+    html += '</div>';
   }
   el("cobRows").innerHTML = html;
 }
@@ -404,8 +447,7 @@ function preencherCobPadrao(){
   var lista = RAMOS[ramoAtual].cob;
   for(var i=0;i<NLINHAS;i++){
     el("cn_"+i).value = lista[i] || "";
-    el("c1_"+i).value = "";
-    el("c2_"+i).value = "";
+    for(var j=1;j<=NOPCOES;j++){ var c = el("c"+j+"_"+i); if(c) c.value = ""; }
   }
 }
 
@@ -417,6 +459,7 @@ function coletar(){
     if(!e.id) return;
     d[e.id] = e.type==="checkbox" ? e.checked : e.value;
   });
+  d._nopcoes = NOPCOES; // guarda quantas seguradoras estavam em uso
   return d;
 }
 function salvar(){
@@ -434,10 +477,15 @@ function trocarRamo(novo, primeira){
   if(!primeira) salvar();
   ramoAtual = novo;
   el("ramo").value = novo;
-  montarDados();
-  montarCobRows();
   var salvo = null;
   try{ salvo = JSON.parse(localStorage.getItem(chaveRamo()) || "null"); }catch(e){}
+  // cada ramo lembra quantas seguradoras estavam em uso
+  if(salvo && salvo._nopcoes) NOPCOES = Math.max(1, Math.min(MAXOPC, parseInt(salvo._nopcoes, 10) || 2));
+  montarDados();
+  montarSeg();
+  montarValores();
+  montarCobRows();
+  montarSaida();
   if(salvo){ aplicar(salvo); } else { preencherCobPadrao(); }
   if(!val("propData")) el("propData").value = new Date().toISOString().slice(0,10);
   render();
@@ -466,13 +514,15 @@ function render(){
   for(var i=0;i<NLINHAS;i++){
     var nome = val("cn_"+i);
     if(!nome || !String(nome).trim()) continue;
-    linhas += '<tr><td class="item">'+esc(nome)+'</td>'
-            + '<td class="col">'+esc(dinheiro(val("c1_"+i))||"—")+'</td>'
-            + '<td class="col">'+esc(dinheiro(val("c2_"+i))||"—")+'</td></tr>';
+    linhas += '<tr><td class="item">'+esc(nome)+'</td>';
+    for(var j=1;j<=NOPCOES;j++) linhas += '<td class="col">'+esc(dinheiro(val("c"+j+"_"+i))||"—")+'</td>';
+    linhas += '</tr>';
   }
-  el("oCob").innerHTML = linhas || '<tr><td class="item">—</td><td class="col">—</td><td class="col">—</td></tr>';
+  el("oCob").innerHTML = linhas
+    || ('<tr><td class="item">—</td>' + Array(NOPCOES + 1).join('<td class="col">—</td>') + '</tr>');
 
-  [1,2].forEach(function(i){
+  var listaOpc = []; for(var z=1; z<=NOPCOES; z++) listaOpc.push(z);
+  listaOpc.forEach(function(i){
     el("outra"+i).style.display = val("s"+i) === "__outra__" ? "block" : "none";
     var nome = nomeSeguradora(i);
     el("oS"+i).textContent = nome;
@@ -515,8 +565,9 @@ function limpar(){
   try{ localStorage.removeItem(chaveRamo()); }catch(e){}
   el("outrosNome").value="";
   el("vigIni").value=""; el("vigFim").value="";
-  ["1","2"].forEach(function(i){
-    el("s"+i).selectedIndex = i==="2" ? 1 : 0; el("outra"+i).value="";
+  var ids = []; for(var z=1; z<=NOPCOES; z++) ids.push(String(z));
+  ids.forEach(function(i){
+    el("s"+i).selectedIndex = Math.min(parseInt(i,10)-1, SEGURADORAS.length-1); el("outra"+i).value="";
     el("pre"+i).value=""; el("npar"+i).value=""; el("vpar"+i).value="";
     el("fc"+i).checked=false; el("fb"+i).checked=false; el("fd"+i).checked=false; el("rec"+i).checked=false;
   });
