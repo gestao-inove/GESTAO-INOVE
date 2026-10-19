@@ -3276,35 +3276,70 @@ function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes, car
   const [refMes, setRefMes] = useState(monthKey(todayStr()));
   const [contasPagarAberto, setContasPagarAberto] = useState(true);
   const [fluxoAberto, setFluxoAberto] = useState(true);
+  const [linhaAberta, setLinhaAberta] = useState(null); // qual linha está mostrando os lançamentos
 
-  const recebidoDoMes = (mk) => financeiro
-    .filter((f) => f.pago && monthKey(f.data) === mk)
-    .reduce((s, f) => s + (f.valorPago || 0), 0);
-  const custoDoMes = (mk) => financeiro
-    .filter((f) => f.pago && monthKey(f.data) === mk)
-    .reduce((s, f) => s + (f.custo || 0), 0);
-  const gastosDoMes = (mk) => (despesas || [])
-    .filter((d) => gastoNoMes(d, mk))
-    .reduce((s, d) => s + (d.valor || 0), 0);
-  const aReceberDoMes = (mk) => financeiro
-    .filter((f) => !f.pago && monthKey(f.data) === mk)
-    .reduce((s, f) => s + (f.valorPago || 0), 0);
+  const soma = (arr, campo) => arr.reduce((s, x) => s + (x[campo] || 0), 0);
 
-  const recebido = recebidoDoMes(refMes);
-  const custos = custoDoMes(refMes);
-  const gastos = gastosDoMes(refMes);
+  // ---------- EMPRESA ----------
+  const recebidoItens = financeiro.filter((f) => f.pago && monthKey(f.data) === refMes)
+    .map((f) => ({ id: f.id, nome: f.cliente, data: f.data, valor: f.valorPago || 0 }));
+  const aReceberItens = financeiro.filter((f) => !f.pago && monthKey(f.data) === refMes)
+    .map((f) => ({ id: f.id, nome: f.cliente, data: f.data, valor: f.valorPago || 0 }));
+  const custoItens = financeiro.filter((f) => f.pago && monthKey(f.data) === refMes && (f.custo || 0) > 0)
+    .map((f) => ({ id: "c" + f.id, nome: "Custo · " + f.cliente, data: f.data, valor: f.custo || 0 }));
+  const gastoItens = (despesas || []).filter((d) => gastoNoMes(d, refMes))
+    .map((d) => ({ id: d.id, nome: d.titulo, data: d.data, valor: d.valor || 0 }));
+
+  const recebido = soma(recebidoItens, "valor");
+  const aReceber = soma(aReceberItens, "valor");
+  const custos = soma(custoItens, "valor");
+  const gastos = soma(gastoItens, "valor");
   const saidas = custos + gastos;
-  const aReceber = aReceberDoMes(refMes);
   const resultado = recebido - saidas;
   const margem = recebido > 0 ? Math.round((resultado / recebido) * 100) : null;
 
+  // Mês anterior, para a comparação nos cartões
+  const recebidoDoMes = (mk) => financeiro.filter((f) => f.pago && monthKey(f.data) === mk).reduce((s, f) => s + (f.valorPago || 0), 0);
+  const custoDoMes = (mk) => financeiro.filter((f) => f.pago && monthKey(f.data) === mk).reduce((s, f) => s + (f.custo || 0), 0);
+  const gastosDoMes = (mk) => (despesas || []).filter((d) => gastoNoMes(d, mk)).reduce((s, d) => s + (d.valor || 0), 0);
   const mesAnt = addMonths(refMes, -1);
   const labelAnt = monthLabelShort(mesAnt);
   const recebidoAnt = recebidoDoMes(mesAnt);
   const saidasAnt = custoDoMes(mesAnt) + gastosDoMes(mesAnt);
   const resultadoAnt = recebidoAnt - saidasAnt;
 
-  // Últimos 6 meses até o mês selecionado
+  // ---------- PESSOAL ----------
+  const despPessoaisItens = (despesas || [])
+    .filter((d) => !ehGastoNegocio(d) && (d.tipo === "fixa" ? monthKey(d.data) <= refMes : monthKey(d.data) === refMes))
+    .map((d) => ({ id: d.id, nome: d.titulo + (d.tipo === "fixa" ? " · conta fixa" : ""), data: d.data, valor: d.valor || 0 }));
+  const despPessoais = soma(despPessoaisItens, "valor");
+
+  const faturaItens = (cartoes || []).map((ct) => {
+    const total = (comprasCartao || []).filter((c) => c.cartaoId === ct.id)
+      .reduce((s, c) => { const p = parcelaInfo(c, refMes); return p ? s + c.valorParcela : s; }, 0);
+    return { id: ct.id, nome: "Fatura " + ct.nome, valor: total };
+  }).filter((f) => f.valor > 0);
+  const totalFatura = soma(faturaItens, "valor");
+
+  const contasPF = (contas || []).filter((c) => (c.tipo || "pf") === "pf");
+  const idsPF = {}; contasPF.forEach((c) => { idsPF[c.id] = true; });
+  const movPFMes = (movimentacoes || []).filter((m) => idsPF[m.contaId] && monthKey(m.data) === refMes);
+  const entradasPFItens = movPFMes.filter((m) => m.tipo === "entrada")
+    .map((m) => ({ id: m.id, nome: m.descricao || "Entrada", data: m.data, valor: m.valor || 0 }));
+  const saidasPFItens = movPFMes.filter((m) => m.tipo === "saida")
+    .map((m) => ({ id: m.id, nome: m.descricao || "Saída", data: m.data, valor: m.valor || 0 }));
+  const entradasPF = soma(entradasPFItens, "valor");
+  const saidasPF = soma(saidasPFItens, "valor");
+  const totalPessoalPagar = despPessoais + totalFatura;
+
+  // ---------- SALDOS ----------
+  const fluxoNegocio = fluxoNegocioConta(financeiro, despesas);
+  const totalPJ = (contas || []).filter((c) => c.tipo === "pj")
+    .reduce((s, c) => s + saldoDaConta(c, movimentacoes || [], fluxoNegocio), 0);
+  const totalPF = contasPF.reduce((s, c) => s + saldoDaConta(c, movimentacoes || []), 0);
+  const saldoAtual = totalPJ + totalPF;
+
+  // Últimos 6 meses (gráfico)
   const dadosGrafico = [];
   for (let i = 5; i >= 0; i--) {
     const m = addMonths(refMes, -i);
@@ -3316,50 +3351,80 @@ function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes, car
     });
   }
 
-  const fluxoNegocio = fluxoNegocioConta(financeiro, despesas);
-  const totalPJ = (contas || []).filter((c) => c.tipo === "pj")
-    .reduce((s, c) => s + saldoDaConta(c, movimentacoes || [], fluxoNegocio), 0);
-  const totalPF = (contas || []).filter((c) => (c.tipo || "pf") === "pf")
-    .reduce((s, c) => s + saldoDaConta(c, movimentacoes || []), 0);
-
-  const Linha = ({ rotulo, valor, forte }) => (
-    <div className="flex items-center justify-between py-1.5"
-         style={{ borderTop: forte ? `1px solid ${COLORS.line}` : "none" }}>
-      <span className="text-xs" style={{ color: forte ? COLORS.ink : COLORS.inkSoft, fontWeight: forte ? 600 : 400 }}>{rotulo}</span>
-      <span className="text-xs font-semibold" style={{ color: forte ? COLORS.burgundy : COLORS.ink, fontFamily: "ui-monospace, monospace" }}>{fmtMoney(valor)}</span>
-    </div>
-  );
-
-  // Contas a pagar (próximos ~2 meses) — vencimentos de gastos, contas fixas e faturas
   const contasPagar = montarContasAPagar(despesas, cartoes, comprasCartao, pagamentosFatura, refMes);
   const totalPagar = contasPagar.reduce((s, i) => s + (i.valor || 0), 0);
   const hojeStr2 = todayStr();
   const diasAteVenc = (d) => Math.round((new Date(d) - new Date(hojeStr2)) / 86400000);
   const iconePagar = { fixa: Repeat, gasto: Receipt, fatura: CreditCard };
-
-  // Fluxo de caixa projetado (6 meses) a partir do saldo atual disponível
-  const saldoAtual = totalPJ + totalPF;
   const fluxo = projecaoFluxoCaixa(financeiro, despesas, cartoes, comprasCartao, pagamentosFatura, saldoAtual, 6);
+
+  // Linha que abre os lançamentos que formam o número
+  const LinhaDetalhe = ({ chave, rotulo, valor, itens, cor, forte }) => {
+    const lista = itens || [];
+    const aberta = linhaAberta === chave;
+    const temItens = lista.length > 0;
+    return (
+      <div style={{ borderTop: forte ? `1px solid ${COLORS.line}` : `1px dashed ${COLORS.line}` }}>
+        <button onClick={() => { if (temItens) setLinhaAberta(aberta ? null : chave); }}
+                className="w-full flex items-center justify-between py-2 text-left"
+                style={{ cursor: temItens ? "pointer" : "default" }}
+                title={temItens ? "Ver os lançamentos" : "Nada lançado neste mês"}>
+          <span className="flex items-center gap-1 text-xs"
+                style={{ color: forte ? COLORS.ink : COLORS.inkSoft, fontWeight: forte ? 700 : 400 }}>
+            {rotulo}
+            {temItens && (
+              <React.Fragment>
+                <span style={{ color: COLORS.inkSoft }}>({lista.length})</span>
+                {aberta ? <ChevronDown size={12} color={COLORS.inkSoft} /> : <ChevronRight size={12} color={COLORS.inkSoft} />}
+              </React.Fragment>
+            )}
+          </span>
+          <span className="text-xs font-bold"
+                style={{ color: cor || COLORS.ink, fontFamily: "ui-monospace, monospace" }}>{fmtMoney(valor)}</span>
+        </button>
+        {aberta && (
+          <div className="pb-2 pl-2">
+            {lista.map((it, i) => (
+              <div key={it.id || i} className="flex items-center justify-between py-1 gap-2">
+                <span className="text-[11px] truncate" style={{ color: COLORS.inkSoft }}>
+                  {it.nome}{it.data ? " · " + fmtDatePt(it.data) : ""}
+                </span>
+                <span className="text-[11px] flex-shrink-0" style={{ color: COLORS.ink, fontFamily: "ui-monospace, monospace" }}>{fmtMoney(it.valor)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div>
-      <div className="rounded-lg p-2 mb-3 flex items-center justify-between" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
-        <button onClick={() => setRefMes((m) => addMonths(m, -1))} className="p-1.5 rounded-lg hover:bg-black/5" title="Mês anterior">
-          <ChevronLeft size={18} color={COLORS.inkSoft} />
-        </button>
-        <div className="text-center leading-tight">
-          <div className="text-[11px]" style={{ color: COLORS.inkSoft }}>Mês</div>
-          <div className="text-sm font-semibold capitalize" style={{ color: COLORS.ink }}>{monthLabelShort(refMes)}</div>
-          {refMes !== monthKey(todayStr()) && (
-            <button onClick={() => setRefMes(monthKey(todayStr()))} className="text-[10px] underline" style={{ color: COLORS.inkSoft }}>voltar ao mês atual</button>
-          )}
+      {/* Mês + saldo consolidado */}
+      <div className="rounded-lg p-3 mb-3 flex items-center justify-between gap-3" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
+        <div className="flex items-center gap-1">
+          <button onClick={() => setRefMes((m) => addMonths(m, -1))} className="p-1.5 rounded-lg hover:bg-black/5" title="Mês anterior">
+            <ChevronLeft size={18} color={COLORS.inkSoft} />
+          </button>
+          <div className="text-center leading-tight" style={{ minWidth: 92 }}>
+            <div className="text-[11px]" style={{ color: COLORS.inkSoft }}>Mês</div>
+            <div className="text-sm font-semibold capitalize" style={{ color: COLORS.ink }}>{monthLabelShort(refMes)}</div>
+            {refMes !== monthKey(todayStr()) && (
+              <button onClick={() => setRefMes(monthKey(todayStr()))} className="text-[10px] underline" style={{ color: COLORS.inkSoft }}>voltar ao mês atual</button>
+            )}
+          </div>
+          <button onClick={() => setRefMes((m) => addMonths(m, 1))} className="p-1.5 rounded-lg hover:bg-black/5" title="Próximo mês">
+            <ChevronRight size={18} color={COLORS.inkSoft} />
+          </button>
         </div>
-        <button onClick={() => setRefMes((m) => addMonths(m, 1))} className="p-1.5 rounded-lg hover:bg-black/5" title="Próximo mês">
-          <ChevronRight size={18} color={COLORS.inkSoft} />
-        </button>
+        <div className="text-right">
+          <div className="text-[11px]" style={{ color: COLORS.inkSoft }}>Saldo consolidado</div>
+          <div className="text-xl font-bold" style={{ color: saldoAtual < 0 ? COLORS.red : COLORS.ink, fontFamily: "ui-monospace, monospace" }}>{fmtMoney(saldoAtual)}</div>
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 mb-3">
+      {/* Indicadores do mês */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
         <Card titulo="Recebido" valor={recebido} cor={COLORS.green} Icon={TrendingUp}
               variacao={variacaoPct(recebido, recebidoAnt)} mesAnterior={labelAnt} sobeEhBom />
         <Card titulo="A receber" valor={aReceber} cor={COLORS.camelDeep} Icon={Hourglass} />
@@ -3370,6 +3435,38 @@ function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes, car
               variacao={variacaoPct(resultado, resultadoAnt)} mesAnterior={labelAnt} sobeEhBom />
       </div>
 
+      {/* Empresa x Pessoal lado a lado — clique na linha para ver os lançamentos */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+        <div className="rounded-lg p-4" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
+          <div className="flex items-center gap-2 mb-1">
+            <Landmark size={16} color={COLORS.burgundy} />
+            <span className="text-sm font-semibold" style={{ color: COLORS.ink }}>Empresa</span>
+            <span className="ml-auto text-sm font-bold" style={{ color: totalPJ < 0 ? COLORS.red : COLORS.ink, fontFamily: "ui-monospace, monospace" }}>{fmtMoney(totalPJ)}</span>
+          </div>
+          <div className="text-[10px] mb-1" style={{ color: COLORS.inkSoft }}>saldo nas contas PJ</div>
+          <LinhaDetalhe chave="e-rec" rotulo="Recebido" valor={recebido} itens={recebidoItens} cor={COLORS.green} />
+          <LinhaDetalhe chave="e-arec" rotulo="A receber" valor={aReceber} itens={aReceberItens} cor={COLORS.camelDeep} />
+          <LinhaDetalhe chave="e-cus" rotulo="Custos dos atendimentos" valor={custos} itens={custoItens} cor={COLORS.red} />
+          <LinhaDetalhe chave="e-gas" rotulo="Gastos da empresa" valor={gastos} itens={gastoItens} cor={COLORS.red} />
+          <LinhaDetalhe chave="e-res" rotulo="Resultado do mês" valor={resultado} itens={[]} cor={resultado < 0 ? COLORS.red : COLORS.burgundy} forte />
+        </div>
+
+        <div className="rounded-lg p-4" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
+          <div className="flex items-center gap-2 mb-1">
+            <Wallet size={16} color={COLORS.camelDeep} />
+            <span className="text-sm font-semibold" style={{ color: COLORS.ink }}>Pessoal</span>
+            <span className="ml-auto text-sm font-bold" style={{ color: totalPF < 0 ? COLORS.red : COLORS.ink, fontFamily: "ui-monospace, monospace" }}>{fmtMoney(totalPF)}</span>
+          </div>
+          <div className="text-[10px] mb-1" style={{ color: COLORS.inkSoft }}>saldo nas contas pessoais</div>
+          <LinhaDetalhe chave="p-ent" rotulo="Entradas nas contas" valor={entradasPF} itens={entradasPFItens} cor={COLORS.green} />
+          <LinhaDetalhe chave="p-sai" rotulo="Saídas nas contas" valor={saidasPF} itens={saidasPFItens} cor={COLORS.red} />
+          <LinhaDetalhe chave="p-des" rotulo="Despesas do mês" valor={despPessoais} itens={despPessoaisItens} cor={COLORS.red} />
+          <LinhaDetalhe chave="p-fat" rotulo="Faturas de cartão" valor={totalFatura} itens={faturaItens} cor={COLORS.red} />
+          <LinhaDetalhe chave="p-tot" rotulo="Total a pagar no mês" valor={totalPessoalPagar} itens={[]} cor={COLORS.burgundy} forte />
+        </div>
+      </div>
+
+      {/* Contas a pagar */}
       <div className="rounded-lg mb-3 overflow-hidden" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
         <button onClick={() => setContasPagarAberto((v) => !v)} className="w-full flex items-center gap-2 px-3 py-2.5">
           <CalendarPlus size={15} color={COLORS.burgundy} />
@@ -3387,8 +3484,8 @@ function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes, car
               {contasPagar.map((c) => {
                 const dias = diasAteVenc(c.data);
                 const Ic = iconePagar[c.tipo] || Receipt;
-                const venc = c.atrasada ? `Atrasada · venceu há ${Math.abs(dias)} dia(s)`
-                          : dias === 0 ? "Vence hoje" : `Vence ${fmtDatePt(c.data)} · em ${dias} dia(s)`;
+                const etiqueta = c.atrasada ? "Atrasada" : dias === 0 ? "Vence hoje" : `em ${dias} dia(s)`;
+                const corEt = c.atrasada ? COLORS.red : dias <= 3 ? COLORS.camelDeep : COLORS.inkSoft;
                 return (
                   <div key={c.id} className="rounded-lg px-3 py-2 flex items-center gap-2" style={{ backgroundColor: "#F1F3F6" }}>
                     <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
@@ -3400,7 +3497,10 @@ function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes, car
                         {c.titulo}
                         {c.empresa && <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ backgroundColor: COLORS.slate + "22", color: COLORS.slate }}>EMPRESA</span>}
                       </div>
-                      <div className="text-[11px]" style={{ color: c.atrasada ? COLORS.red : COLORS.inkSoft }}>{venc}</div>
+                      <div className="text-[11px] flex items-center gap-1.5" style={{ color: COLORS.inkSoft }}>
+                        <span className="px-1.5 py-0.5 rounded-full font-semibold" style={{ backgroundColor: corEt + "1A", color: corEt }}>{etiqueta}</span>
+                        <span>{fmtDatePt(c.data)}</span>
+                      </div>
                     </div>
                     <div className="text-xs font-bold flex-shrink-0" style={{ color: COLORS.red, fontFamily: "ui-monospace, monospace" }}>− {fmtMoney(c.valor)}</div>
                   </div>
@@ -3411,6 +3511,7 @@ function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes, car
         )}
       </div>
 
+      {/* Fluxo de caixa projetado */}
       <div className="rounded-lg mb-3 overflow-hidden" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
         <button onClick={() => setFluxoAberto((v) => !v)} className="w-full flex items-center gap-2 px-3 py-2.5">
           <TrendingUp size={15} color={COLORS.burgundy} />
@@ -3453,22 +3554,6 @@ function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes, car
 
       <div className="mb-3">
         <GraficoEntradasSaidas dados={dadosGrafico} />
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-lg p-4" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
-          <div className="text-sm font-semibold mb-2" style={{ color: COLORS.ink }}>Resultado do mês</div>
-          <Linha rotulo="Recebido" valor={recebido} />
-          <Linha rotulo="− Custos dos atendimentos" valor={custos} />
-          <Linha rotulo="− Gastos da empresa" valor={gastos} />
-          <Linha rotulo="Resultado" valor={resultado} forte />
-        </div>
-        <div className="rounded-lg p-4" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
-          <div className="text-sm font-semibold mb-2" style={{ color: COLORS.ink }}>Saldo consolidado</div>
-          <Linha rotulo="Contas da empresa (PJ)" valor={totalPJ} />
-          <Linha rotulo="Contas pessoais (PF)" valor={totalPF} />
-          <Linha rotulo="Total disponível" valor={totalPJ + totalPF} forte />
-        </div>
       </div>
     </div>
   );
