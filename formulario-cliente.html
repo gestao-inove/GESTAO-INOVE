@@ -188,6 +188,22 @@
 <script>
 // WhatsApp da corretora (só números, com 55 e DDD) — pra onde as solicitações vão.
 var WHATSAPP = "5519997639554";
+// ---- Integração com o painel da corretora ----
+var API_INOVE = "https://gestao-inove.onrender.com";
+var FORM_KEY = "inove-form-2026";
+// O servidor grátis "dorme" por inatividade: acorda ele assim que a página abre
+try{ fetch(API_INOVE + "/").catch(function(){}); }catch(e){}
+// Abre o atendimento no painel. Se falhar, NÃO atrapalha o envio pelo WhatsApp.
+function registrarNoPainel(subtipo, cpf, notas){
+  try{
+    fetch(API_INOVE + "/api/formulario", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chave: FORM_KEY, subtipo: subtipo, documento: cpf, notas: notas }),
+      keepalive: true
+    }).catch(function(){});
+  }catch(e){}
+}
 
 function el(id){return document.getElementById(id)}
 function v(id){var e=el(id);return e?(e.value||"").trim():""}
@@ -236,6 +252,7 @@ function enviar(){
     + linha("Observações", v("obs"))
     + "\n_Enviado pelo formulário INOVE_";
 
+  registrarNoPainel("auto", v("cpf"), msg);
   window.location.href = "https://wa.me/" + WHATSAPP + "?text=" + encodeURIComponent(msg);
 }
 </script>

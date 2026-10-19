@@ -67,7 +67,8 @@ app.get("/api/verificar", (req, res) => {
 
 // Middleware: exige token válido em todas as rotas /api/* (menos login e verificar)
 app.use("/api", (req, res, next) => {
-  if (req.path === "/login" || req.path === "/verificar" || req.path === "/google/callback") return next();
+  if (req.path === "/login" || req.path === "/verificar" || req.path === "/google/callback"
+      || req.path === "/formulario") return next();
   const token = (req.headers.authorization || "").replace("Bearer ", "");
   if (tokenValido(token)) return next();
   return res.status(401).json({ error: "Não autorizado." });
@@ -182,6 +183,72 @@ app.get("/api/atendimentos", async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Erro ao buscar atendimentos" });
+  }
+});
+
+// ---------- FORMULÁRIO PÚBLICO DO CLIENTE ----------
+// Recebe o formulário que o cliente preenche no site e abre o atendimento sozinho.
+// É público (o cliente não tem login), então: só CRIA, valida tudo e limita por IP.
+const FORM_KEY = process.env.FORM_KEY || "inove-form-2026";
+const enviosPorIp = {};
+function podeEnviarForm(ip) {
+  const agora = Date.now();
+  const lista = (enviosPorIp[ip] || []).filter((t) => agora - t < 60 * 60 * 1000); // última hora
+  if (lista.length >= 10) { enviosPorIp[ip] = lista; return false; }
+  lista.push(agora); enviosPorIp[ip] = lista;
+  return true;
+}
+function campoTxt(v, max) { return String(v == null ? "" : v).trim().slice(0, max || 200); }
+function formatarCpf(d) {
+  return d && d.length === 11 ? d.slice(0,3)+"."+d.slice(3,6)+"."+d.slice(6,9)+"-"+d.slice(9) : d;
+}
+
+app.post("/api/formulario", async (req, res) => {
+  const ip = String(req.headers["x-forwarded-for"] || req.ip || "?").split(",")[0].trim();
+  if (!podeEnviarForm(ip)) return res.status(429).json({ error: "Muitos envios seguidos. Tente mais tarde." });
+  if (campoTxt(req.body.chave, 60) !== FORM_KEY) return res.status(401).json({ error: "Formulário não autorizado." });
+
+  const SUB_OK = ["auto","vida","residencial","empresarial","rc","bike","saude","viagem","celular","outro"];
+  const sub = campoTxt(req.body.subtipo, 20);
+  const subtipo = SUB_OK.indexOf(sub) > -1 ? sub : "outro";
+  const documento = campoTxt(req.body.documento, 30).replace(/\D/g, "");
+  const telefone = campoTxt(req.body.telefone, 30);
+  const notas = campoTxt(req.body.notas, 4000);
+  const hoje = new Date().toISOString().slice(0, 10);
+  const novoId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+  try {
+    // Se esse CPF já é cliente, o atendimento já nasce com o nome certo
+    let nome = "";
+    let contatoId = null;
+    if (documento) {
+      const { rows } = await pool.query(
+        `SELECT id, nome FROM contatos
+         WHERE documento IS NOT NULL AND regexp_replace(documento, '[^0-9]', '', 'g') = $1
+         LIMIT 1`,
+        [documento]
+      );
+      if (rows.length) { nome = rows[0].nome || ""; contatoId = rows[0].id; }
+    }
+    if (!nome) nome = "Novo cliente · CPF " + (formatarCpf(documento) || "não informado");
+
+    await pool.query(
+      `INSERT INTO atendimentos (id, cliente, categoria, subtipo, data_solicitacao, documento, status, notas)
+       VALUES ($1,$2,'seguro',$3,$4,$5,'iniciado',$6)`,
+      [novoId(), nome, subtipo, hoje, documento || null, notas || null]
+    );
+
+    // Cliente novo entra na base de contatos pra da próxima vez já vir com nome
+    if (documento && !contatoId) {
+      await pool.query(
+        `INSERT INTO contatos (id, nome, documento, telefone, email) VALUES ($1,$2,$3,$4,$5)`,
+        [novoId(), nome, documento, telefone || null, null]
+      );
+    }
+    res.status(201).json({ ok: true });
+  } catch (e) {
+    console.error("Erro no formulário público:", e);
+    res.status(500).json({ error: "Erro ao registrar o formulário" });
   }
 });
 
