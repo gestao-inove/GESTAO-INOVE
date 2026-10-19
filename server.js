@@ -68,7 +68,7 @@ app.get("/api/verificar", (req, res) => {
 // Middleware: exige token válido em todas as rotas /api/* (menos login e verificar)
 app.use("/api", (req, res, next) => {
   if (req.path === "/login" || req.path === "/verificar" || req.path === "/google/callback"
-      || req.path === "/formulario") return next();
+      || req.path === "/formulario" || req.path === "/telegram/webhook") return next();
   const token = (req.headers.authorization || "").replace("Bearer ", "");
   if (tokenValido(token)) return next();
   return res.status(401).json({ error: "Não autorizado." });
@@ -186,6 +186,12 @@ app.get("/api/atendimentos", async (req, res) => {
   }
 });
 
+// Data de hoje no horário de Brasília (o servidor roda em UTC: depois das 21h já seria "amanhã")
+function dataHojeBR() {
+  try { return new Date().toLocaleDateString("sv-SE", { timeZone: "America/Sao_Paulo" }); }
+  catch (e) { return new Date().toISOString().slice(0, 10); }
+}
+
 // ---------- FORMULÁRIO PÚBLICO DO CLIENTE ----------
 // Recebe o formulário que o cliente preenche no site e abre o atendimento sozinho.
 // É público (o cliente não tem login), então: só CRIA, valida tudo e limita por IP.
@@ -214,7 +220,7 @@ app.post("/api/formulario", async (req, res) => {
   const documento = campoTxt(req.body.documento, 30).replace(/\D/g, "");
   const telefone = campoTxt(req.body.telefone, 30);
   const notas = campoTxt(req.body.notas, 4000);
-  const hoje = new Date().toISOString().slice(0, 10);
+  const hoje = dataHojeBR();
   const novoId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
   try {
@@ -251,6 +257,168 @@ app.post("/api/formulario", async (req, res) => {
     res.status(500).json({ error: "Erro ao registrar o formulário" });
   }
 });
+
+// ---------- ROBÔ DO TELEGRAM (lança gastos e recebimentos por mensagem) ----------
+// Variáveis no Render: TELEGRAM_TOKEN (do @BotFather) e TELEGRAM_ALLOWED_ID (seu ID; pode ser mais de um, separados por vírgula).
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "";
+const TELEGRAM_ALLOWED = String(process.env.TELEGRAM_ALLOWED_ID || "").split(",").map((s) => s.trim()).filter(Boolean);
+const PUBLIC_URL = process.env.PUBLIC_URL || "https://gestao-inove.onrender.com";
+// O "segredo do webhook" é derivado do token: só o Telegram sabe, e você não precisa criar nada além do token
+const TELEGRAM_SECRET = TELEGRAM_TOKEN
+  ? crypto.createHmac("sha256", SESSION_SECRET).update("telegram:" + TELEGRAM_TOKEN).digest("hex")
+  : "";
+const ultimoLancBot = {}; // chat -> { tabela, id }  (para o "desfazer"; vale enquanto o servidor está acordado)
+
+function idBot() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+function semAcento(s) { return String(s).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase(); }
+function fmtBRL(n) { return "R$ " + Number(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
+async function telegramEnviar(chatId, texto) {
+  if (!TELEGRAM_TOKEN || typeof fetch !== "function") return;
+  try {
+    await fetch("https://api.telegram.org/bot" + TELEGRAM_TOKEN + "/sendMessage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: texto }),
+    });
+  } catch (e) { console.error("Telegram sendMessage falhou:", e.message); }
+}
+
+// "50", "50,90", "1.200,50", "R$ 80" -> número (ou null)
+function lerValor(tok) {
+  let s = String(tok).replace(/r\$/i, "").trim();
+  if (!/^\d[\d.,]*$/.test(s)) return null;
+  if (/^\d+\.\d{1,2}$/.test(s)) return parseFloat(s);          // 50.90
+  s = s.replace(/\./g, "").replace(",", ".");                    // 1.200,50
+  const n = parseFloat(s);
+  return isNaN(n) || n <= 0 ? null : n;
+}
+
+// Entende frases como: "gastei 50 mercado", "empresa 120 internet pix", "recebi 300 João"
+function interpretarMensagem(texto) {
+  const orig = String(texto || "").trim().replace(/\s+/g, " ");
+  if (!orig) return null;
+  const toks = orig.split(" ");
+  const norm = toks.map(semAcento);
+
+  let tipo = null, i = 0;
+  const w0 = norm[0];
+  if (["recebi", "recebimento", "entrada", "entrou"].indexOf(w0) > -1) { tipo = "receita"; i = 1; }
+  else if (["empresa", "negocio"].indexOf(w0) > -1) { tipo = "empresa"; i = 1; }
+  else if (["gastei", "paguei", "gasto", "despesa", "comprei"].indexOf(w0) > -1) {
+    tipo = "pessoal"; i = 1;
+    // "gastei na empresa 120 internet" / "gasto empresa 120 ..."
+    let j = i; if (["na", "da", "no", "do", "pela", "pelo"].indexOf(norm[j]) > -1) j++;
+    if (["empresa", "negocio"].indexOf(norm[j]) > -1) { tipo = "empresa"; i = j + 1; }
+  }
+  if (!tipo) return null;
+
+  let valor = null, forma = null;
+  const desc = [];
+  const FILLER = ["de", "do", "da", "no", "na", "em", "com", "reais", "real", "para", "pra", "o", "a"];
+  for (let k = i; k < toks.length; k++) {
+    if (norm[k] === "r$") continue;                               // "R$ 50" (cifrão separado do número)
+    const v = valor === null ? lerValor(toks[k]) : null;
+    if (v !== null) { valor = v; continue; }
+    if (["pix", "boleto", "dinheiro"].indexOf(norm[k]) > -1) { forma = norm[k] === "pix" ? "Pix" : norm[k] === "boleto" ? "Boleto" : "Dinheiro"; continue; }
+    desc.push({ t: toks[k], n: norm[k] });
+  }
+  if (valor === null) return { erro: "valor" };
+  while (desc.length && FILLER.indexOf(desc[0].n) > -1) desc.shift();   // tira "de/do/na" do começo
+  const descricao = desc.map((d) => d.t).join(" ").trim();
+  return { tipo, valor, forma, descricao };
+}
+
+const AJUDA_BOT =
+  "Como lançar:\n\n" +
+  "• gastei 50 mercado → gasto pessoal\n" +
+  "• empresa 120 internet → gasto da empresa\n" +
+  "• recebi 300 João → recebimento\n\n" +
+  "Opcional: coloque pix, boleto ou dinheiro na frase.\n" +
+  "Para apagar o último lançamento: desfazer";
+
+async function lancarPeloBot(chatId, p) {
+  const hoje = dataHojeBR();
+  const mk = hoje.slice(0, 7);
+  if (p.tipo === "receita") {
+    const id = idBot();
+    await pool.query(
+      `INSERT INTO financeiro (id, cliente, categoria, subtipo, valor_pago, custo, forma, data, pago)
+       VALUES ($1,$2,'outros','servico',$3,0,$4,$5,true)`,
+      [id, p.descricao || "Recebimento", p.valor, p.forma, hoje]
+    );
+    ultimoLancBot[chatId] = { tabela: "financeiro", id };
+    return "✅ Recebimento lançado: " + fmtBRL(p.valor) + " · " + (p.descricao || "Recebimento");
+  }
+  const id = idBot();
+  const tipoDb = p.tipo === "empresa" ? "negocio_avulso" : "avulso";
+  await pool.query(
+    `INSERT INTO despesas (id, titulo, tipo, valor, data, notas, forma, pago, meses_pagos, datas_pagas)
+     VALUES ($1,$2,$3,$4,$5,'via Telegram',$6,true,'[]',$7)`,
+    [id, p.descricao || "Sem descrição", tipoDb, p.valor, hoje, p.forma, JSON.stringify({ [mk]: hoje })]
+  );
+  ultimoLancBot[chatId] = { tabela: "despesas", id };
+  return "✅ " + (p.tipo === "empresa" ? "Gasto da empresa" : "Gasto pessoal") + " lançado: " + fmtBRL(p.valor) + " · " + (p.descricao || "Sem descrição");
+}
+
+app.post("/api/telegram/webhook", async (req, res) => {
+  if (!TELEGRAM_TOKEN) return res.sendStatus(503);
+  // só aceita chamadas que vieram do Telegram (ele manda o segredo no cabeçalho)
+  if (req.headers["x-telegram-bot-api-secret-token"] !== TELEGRAM_SECRET) return res.sendStatus(401);
+
+  const msg = req.body && req.body.message;
+  res.sendStatus(200); // responde já, para o Telegram não repetir a entrega
+  if (!msg || !msg.chat || !msg.from) return;
+
+  const chatId = msg.chat.id;
+  const userId = String(msg.from.id);
+  const texto = String(msg.text || msg.caption || "").trim();
+
+  try {
+    if (TELEGRAM_ALLOWED.indexOf(userId) === -1) {
+      await telegramEnviar(chatId, "Este robô é privado.\nSeu ID do Telegram é: " + userId + "\nPeça para liberar esse número no servidor.");
+      return;
+    }
+    const baixo = semAcento(texto);
+    if (baixo === "/start" || baixo === "/ajuda" || baixo === "ajuda") { await telegramEnviar(chatId, "Olá! Sou o robô do Painel Inove. 👋\n\n" + AJUDA_BOT); return; }
+
+    if (baixo === "desfazer" || baixo === "/desfazer") {
+      const u = ultimoLancBot[chatId];
+      if (!u) { await telegramEnviar(chatId, "Não tenho um lançamento recente para desfazer. Se precisar, apague direto no painel."); return; }
+      await pool.query("DELETE FROM " + (u.tabela === "financeiro" ? "financeiro" : "despesas") + " WHERE id = $1", [u.id]);
+      delete ultimoLancBot[chatId];
+      await telegramEnviar(chatId, "↩️ Último lançamento apagado.");
+      return;
+    }
+
+    if (!texto && (msg.photo || msg.document)) {
+      await telegramEnviar(chatId, "Recebi a foto, mas por enquanto só entendo mensagens de texto. Digite, por exemplo: gastei 50 mercado");
+      return;
+    }
+
+    const p = interpretarMensagem(texto);
+    if (!p) { await telegramEnviar(chatId, "Não entendi. 🤔\n\n" + AJUDA_BOT); return; }
+    if (p.erro === "valor") { await telegramEnviar(chatId, "Faltou o valor. Exemplo: gastei 50 mercado"); return; }
+    await telegramEnviar(chatId, await lancarPeloBot(chatId, p));
+  } catch (e) {
+    console.error("Erro no robô do Telegram:", e);
+    await telegramEnviar(chatId, "Deu erro ao lançar. Tente de novo em instantes.");
+  }
+});
+
+// Ao ligar o servidor, registra o endereço do robô no Telegram (só roda se o token existir)
+async function registrarWebhookTelegram() {
+  if (!TELEGRAM_TOKEN || typeof fetch !== "function") return;
+  try {
+    const r = await fetch("https://api.telegram.org/bot" + TELEGRAM_TOKEN + "/setWebhook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: PUBLIC_URL + "/api/telegram/webhook", secret_token: TELEGRAM_SECRET, allowed_updates: ["message"] }),
+    });
+    const j = await r.json();
+    console.log("Telegram webhook:", j.ok ? "registrado" : "falhou — " + (j.description || r.status));
+  } catch (e) { console.error("Telegram setWebhook falhou:", e.message); }
+}
 
 app.post("/api/atendimentos", async (req, res) => {
   const { id, cliente, categoria, subtipo, horarioSolicitado, dataSolicitacao, dataAgendamento, horarioAgendamento, valor, custo, documento, comissao, seguradora, pagamento, status, notas, forma, previsaoRecebimento } = req.body;
@@ -921,4 +1089,7 @@ app.delete("/api/movimentacoes/:id", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`API rodando na porta ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`API rodando na porta ${PORT}`);
+  registrarWebhookTelegram();
+});
