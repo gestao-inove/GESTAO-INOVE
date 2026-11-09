@@ -1517,9 +1517,24 @@ function EditFinanceModal({ item, onClose, onSave }) {
 
 // Gastos da empresa (despesas com tipo negocio_*). Avulso conta só no mês; conta fixa recorre a partir do início.
 function ehGastoNegocio(d) { return d.tipo === "negocio_avulso" || d.tipo === "negocio_fixa"; }
+// ====== MARCO ZERO ======
+// A partir deste mês o financeiro recomeça do zero, SEM apagar nada: o que veio de antes
+// (contas fixas recorrentes, recebíveis atrasados, alertas) fica "congelado" nos meses anteriores
+// e continua aparecendo quando você navega até eles. Para mudar a data, é só trocar o valor abaixo.
+const MARCO_ZERO = "2026-11";
+const MARCO_ZERO_DIA = MARCO_ZERO + "-01";
+// A conta fixa d vale (aparece / recorre) no mês mk? As criadas antes do marco param no mês anterior a ele.
+function fixaVale(d, mk) {
+  const ini = monthKey(d.data);
+  if (ini > mk) return false;
+  if (ini < MARCO_ZERO && mk >= MARCO_ZERO) return false;
+  return true;
+}
+// Em listas sem navegação de mês: esconde o que é de antes do marco, quando o marco já chegou
+function aposMarcoZero(data) { return todayStr() < MARCO_ZERO_DIA || (data || "") >= MARCO_ZERO_DIA; }
 function gastoNoMes(d, mk) {
   if (!ehGastoNegocio(d)) return false;
-  if (d.tipo === "negocio_fixa") return monthKey(d.data) <= mk;
+  if (d.tipo === "negocio_fixa") return fixaVale(d, mk);
   return monthKey(d.data) === mk;
 }
 
@@ -1679,7 +1694,7 @@ function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
 
   // Recebíveis atrasados: "a receber" cuja data prevista já passou (todos os meses)
   const hojeStr = todayStr();
-  const atrasados = financeiro.filter((f) => !f.pago && f.data && f.data < hojeStr)
+  const atrasados = financeiro.filter((f) => !f.pago && f.data && f.data < hojeStr && aposMarcoZero(f.data))
     .sort((a, b) => (a.data || "").localeCompare(b.data || ""));
   const totalAtrasado = atrasados.reduce((s, f) => s + (f.valorPago || 0), 0);
   const diasAtraso = (d) => Math.max(0, Math.round((new Date(hojeStr) - new Date(d)) / 86400000));
@@ -1687,7 +1702,10 @@ function NegocioFinanceiro({ financeiro, onAdd, onEdit, onDelete, onMarcarPago,
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <p className="text-xs" style={{ color: COLORS.inkSoft }}>Recebimentos e custos do negócio</p>
+        <p className="text-xs" style={{ color: COLORS.inkSoft }}>
+          Recebimentos e custos do negócio
+          {refMes >= MARCO_ZERO && <span className="block text-[11px] mt-0.5">Recomeço em novembro: o que era de antes continua guardado nos meses anteriores.</span>}
+        </p>
         <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium"
                 style={{ backgroundColor: COLORS.burgundy, color: "#fff" }}>
           <Plus size={16} color="#fff" /> Lançar
@@ -2766,6 +2784,7 @@ function fluxoNegocioConta(financeiro, despesas) {
       let mk = monthKey(d.data);
       let guard = 0;
       while (mk <= mesAtual && guard < 240) {
+        if (!fixaVale(d, mk)) { mk = addMonths(mk, 1); guard++; continue; } // conta fixa antiga não recorre após o marco zero
         const dataOcorrencia = mk + "-" + dia;
         if (dataOcorrencia <= hoje || (d.mesesPagos || []).includes(mk)) {
           // Se esse mês foi pago e você informou a data, entra na data do pagamento (senão, no vencimento)
@@ -3014,7 +3033,7 @@ function ContasView({ contas, movimentacoes, onAddConta, onDeleteConta, onAddMov
   );
 }
 
-function DespesasView({ despesas, onAdd, onEdit, onDelete, totalRecebidoNegocio, totalCustoNegocio, aReceberNegocio,
+function DespesasView({ despesas: despesasTodas, onAdd, onEdit, onDelete, totalRecebidoNegocio, totalCustoNegocio, aReceberNegocio,
                          contas, movimentacoes, onAddConta, onDeleteConta, onAddMov, onDeleteMov,
                          pagamentosFatura, onPagarFatura, onDesfazerPagamento,
                          cartoes, comprasCartao, onAddCartao, onDeleteCartao, onAddCompra, onEditCompra, onDeleteCompra }) {
@@ -3022,6 +3041,13 @@ function DespesasView({ despesas, onAdd, onEdit, onDelete, totalRecebidoNegocio,
   const [editingItem, setEditingItem] = useState(null);
   const [filtro, setFiltro] = useState(null);
 
+  // Marco zero: nesta tela (sem navegação de mês) só entra o que é do marco em diante.
+  // As despesas pessoais antigas continuam salvas e aparecem na Visão geral, navegando até o mês delas.
+  const despesas = despesasTodas.filter((d) => {
+    if (d.tipo === "fixa") return todayStr() < MARCO_ZERO_DIA || monthKey(d.data) >= MARCO_ZERO;
+    if (d.tipo === "avulso") return aposMarcoZero(d.data);
+    return true;
+  });
   const totalPorTipo = (key) => despesas.filter((d) => d.tipo === key).reduce((s, d) => s + (d.valor || 0), 0);
   const [subTab, setSubTab] = useState("contas");
   const [mesDetalhe, setMesDetalhe] = useState(null);
@@ -3209,7 +3235,7 @@ function montarContasAPagar(despesas, cartoes, comprasCartao, pagamentosFatura, 
     const empresa = d.tipo === "negocio_fixa" || d.tipo === "negocio_avulso";
     if (recorrente) {
       // Conta fixa: mostra a ocorrência do mês, se ela já começou até esse mês
-      if (monthKey(d.data) > mk) return;
+      if (!fixaVale(d, mk)) return;
       if ((d.mesesPagos || []).includes(mk)) return; // esse mês já foi pago
       const dia = (d.data || "").slice(8, 10) || "01";
       const data = mk + "-" + dia;
@@ -3251,7 +3277,7 @@ function projecaoFluxoCaixa(financeiro, despesas, cartoes, comprasCartao, pagame
         const oc = mk + "-" + dia;
         if (oc < hoje) return;
         if (d.pago && mk === inicioMk) return;
-        if (monthKey(d.data) <= mk) saidas += d.valor || 0;
+        if (fixaVale(d, mk)) saidas += d.valor || 0;
       } else {
         if (d.pago || !d.data) return;
         if (monthKey(d.data) === mk && (d.data || "") >= hoje) saidas += d.valor || 0;
@@ -3310,7 +3336,7 @@ function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes, car
 
   // ---------- PESSOAL ----------
   const despPessoaisItens = (despesas || [])
-    .filter((d) => !ehGastoNegocio(d) && (d.tipo === "fixa" ? monthKey(d.data) <= refMes : monthKey(d.data) === refMes))
+    .filter((d) => !ehGastoNegocio(d) && (d.tipo === "fixa" ? fixaVale(d, refMes) : monthKey(d.data) === refMes))
     .map((d) => ({ id: d.id, nome: d.titulo + (d.tipo === "fixa" ? " · conta fixa" : ""), data: d.data, valor: d.valor || 0 }));
   const despPessoais = soma(despPessoaisItens, "valor");
 
@@ -4098,7 +4124,7 @@ function AlertaRecebimento({ financeiro, onMarcarPago }) {
     try { localStorage.setItem("recebAdiados", JSON.stringify(novo)); } catch (e) {}
   };
   const aReceber = (financeiro || [])
-    .filter((f) => f.categoria === "certificado" && !f.pago && f.data && f.data <= hoje && adiados[f.id] !== hoje)
+    .filter((f) => f.categoria === "certificado" && !f.pago && f.data && f.data <= hoje && aposMarcoZero(f.data) && adiados[f.id] !== hoje)
     .sort((a, b) => String(a.data).localeCompare(String(b.data)));
   if (aReceber.length === 0) return null;
   const total = aReceber.reduce((s, f) => s + (f.valorPago || 0), 0);
@@ -4155,7 +4181,7 @@ function DashboardView({ atendimentos, clientes, financeiro, agendamentos, despe
   const saldoMes = receitaMes - custosMes - gastosMes;
   const aReceberMes = financeiro.filter((f) => !f.pago && monthKey(f.data) === mk).reduce((s, f) => s + (f.valorPago || 0), 0);
   const agendPend = (agendamentos || []).filter((a) => (a.data || "") >= hoje).length;
-  const atrasados = financeiro.filter((f) => !f.pago && f.data && f.data < hoje);
+  const atrasados = financeiro.filter((f) => !f.pago && f.data && f.data < hoje && aposMarcoZero(f.data));
   const totalAtrasado = atrasados.reduce((s, f) => s + (f.valorPago || 0), 0);
   const certPendentes = atendimentos.filter((a) => a.categoria === "certificado" && !["emitido", "finalizado"].includes(statusDoItem(a))).length;
   const segurosVencendo = clientes.filter((c) => c.categoria === "seguro")
