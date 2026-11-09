@@ -593,6 +593,48 @@ function mapAnexo(row) {
   };
 }
 
+// ====== RECEBIMENTOS FIXOS (parcelas a receber, dentro das contas PF e PJ) ======
+function diasNoMes(mk) { const p = String(mk).split("-").map(Number); return new Date(p[0], p[1], 0).getDate(); }
+function mapRecebFixo(row) {
+  return {
+    id: row.id, contaId: row.conta_id || "", pagador: row.pagador || "",
+    valor: parseFloat(row.valor) || 0, parcelas: parseInt(row.parcelas, 10) || 1,
+    forma: row.forma || "Pix", dia: parseInt(row.dia, 10) || 1,
+    primeiraData: row.primeira_data ? String(row.primeira_data).slice(0, 10) : "",
+    datasPrevistas: parseDatasPagas(row.datas_previstas), pagas: parseDatasPagas(row.pagas),
+    notas: row.notas || "",
+  };
+}
+// Data prevista da parcela n (1, 2, 3...): um ajuste manual (boleto) vence; senão, o mesmo dia a cada mês
+function dataParcelaRF(rf, n) {
+  const ov = rf.datasPrevistas && rf.datasPrevistas[String(n)];
+  if (ov) return ov;
+  const mk = addMonths(monthKey(rf.primeiraData), n - 1);
+  return mk + "-" + String(Math.min(rf.dia || 1, diasNoMes(mk))).padStart(2, "0");
+}
+function parcelasRF(rf) {
+  const out = [];
+  for (let n = 1; n <= rf.parcelas; n++) {
+    out.push({ n, data: dataParcelaRF(rf, n), paga: (rf.pagas && rf.pagas[String(n)]) || null, id: "rf-" + rf.id + "-" + n });
+  }
+  return out;
+}
+// Só a parcela JÁ RECEBIDA vira entrada na conta (pendente não mexe no saldo)
+function movsDeRecebFixos(lista) {
+  const movs = [];
+  (lista || []).forEach((rf) => {
+    parcelasRF(rf).forEach((p) => {
+      if (!p.paga) return;
+      movs.push({ id: p.id, contaId: rf.contaId, tipo: "entrada", valor: rf.valor,
+                  descricao: "Recebimento fixo · " + rf.pagador + " (" + p.n + "/" + rf.parcelas + ")",
+                  data: p.paga, auto: true, origem: "recebfixo", origemId: rf.id, parcela: p.n });
+    });
+  });
+  return movs;
+}
+// Canal que leva os recebimentos fixos (e as ações) para as telas de contas, dashboard e backup
+const RecebFixosCtx = React.createContext({ lista: [], add: () => {}, edit: () => {}, remove: () => {}, marcar: () => {}, previsao: () => {} });
+
 // ====== COMPONENTES BASE ======
 function Stamp({ categoria, subtipo }) {
   const info = categoriaInfo(categoria);
@@ -2860,9 +2902,247 @@ function AddMovimentacaoModal({ conta, item, onClose, onSave }) {
   );
 }
 
+const FORMAS_RECEB_FIXO = ["Pix", "Boleto", "Dinheiro", "Transferência"];
+
+// Cadastro (e edição) de um recebimento fixo: de quem, quanto, quantas parcelas, forma e dia
+function AddRecebFixoModal({ contas, item, onClose, onSave }) {
+  const hojeS = todayStr();
+  const [contaId, setContaId] = useState(item ? item.contaId : ((contas[0] && contas[0].id) || ""));
+  const [pagador, setPagador] = useState(item ? item.pagador : "");
+  const [valor, setValor] = useState(item ? String(item.valor) : "");
+  const [parcelas, setParcelas] = useState(item ? String(item.parcelas) : "");
+  const [forma, setForma] = useState(item ? item.forma : "Pix");
+  const [dia, setDia] = useState(item ? String(item.dia) : "");
+  const [mesInicio, setMesInicio] = useState(item && item.primeiraData ? monthKey(item.primeiraData) : "");
+  const [dataBoleto, setDataBoleto] = useState(item && item.forma === "Boleto" ? item.primeiraData : "");
+  const [notas, setNotas] = useState(item ? item.notas : "");
+  const [erro, setErro] = useState("");
+  const boleto = forma === "Boleto";
+  const diaN = Math.max(0, Math.min(31, parseInt(dia, 10) || 0));
+  // Sugere o mês da 1ª parcela: se o dia ainda não passou neste mês, começa neste; senão, no próximo
+  const sugestao = diaN ? (diaN >= parseInt(hojeS.slice(8, 10), 10) ? monthKey(hojeS) : addMonths(monthKey(hojeS), 1)) : monthKey(hojeS);
+  const mesEf = mesInicio || sugestao;
+
+  const submit = () => {
+    const nParc = parseInt(parcelas, 10) || 0;
+    if (!contaId) { setErro("Escolha a conta que vai receber."); return; }
+    if (!pagador.trim()) { setErro("Informe de quem você vai receber."); return; }
+    if (!(parseFloat(valor) > 0)) { setErro("Informe o valor de cada parcela."); return; }
+    if (nParc < 1) { setErro("Informe quantas parcelas serão."); return; }
+    let primeiraData, diaFinal;
+    if (boleto) {
+      if (!dataBoleto) { setErro("Informe a data prevista de recebimento da 1ª parcela."); return; }
+      primeiraData = dataBoleto; diaFinal = parseInt(dataBoleto.slice(8, 10), 10);
+    } else {
+      if (!diaN) { setErro("Informe o dia do mês em que o valor cai."); return; }
+      diaFinal = diaN;
+      primeiraData = mesEf + "-" + String(Math.min(diaN, diasNoMes(mesEf))).padStart(2, "0");
+    }
+    const maiorPaga = item ? Math.max(0, ...Object.keys(item.pagas || {}).map(Number)) : 0;
+    if (nParc < maiorPaga) { setErro(`Já existem recebimentos confirmados até a parcela ${maiorPaga}. Use pelo menos ${maiorPaga}.`); return; }
+    onSave({ id: item ? item.id : uid(), contaId, pagador: pagador.trim(), valor: parseFloat(valor) || 0, parcelas: nParc,
+             forma, dia: diaFinal, primeiraData, datasPrevistas: item ? item.datasPrevistas : {}, pagas: item ? item.pagas : {}, notas: notas.trim() });
+    onClose();
+  };
+
+  return (
+    <Modal title={item ? "Editar recebimento fixo" : "Novo recebimento fixo"} onClose={onClose}>
+      {contas.length > 1 && (
+        <Field label="Conta que vai receber">
+          <select style={inputStyle} value={contaId} onChange={(e) => setContaId(e.target.value)}>
+            {contas.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+          </select>
+        </Field>
+      )}
+      <Field label="De quem você vai receber">
+        <input style={inputStyle} value={pagador} onChange={(e) => setPagador(e.target.value)} placeholder="Nome de quem paga" autoFocus />
+      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Valor de cada parcela (R$)">
+          <input type="number" step="0.01" inputMode="decimal" style={inputStyle} value={valor} onChange={(e) => setValor(e.target.value)} placeholder="0,00" />
+        </Field>
+        <Field label="Quantas parcelas">
+          <input type="number" min="1" max="240" inputMode="numeric" style={inputStyle} value={parcelas} onChange={(e) => setParcelas(e.target.value)} placeholder="Ex: 12" />
+        </Field>
+      </div>
+      <Field label="Forma de recebimento">
+        <div className="flex gap-2 flex-wrap">
+          {FORMAS_RECEB_FIXO.map((f) => (
+            <Toggle key={f} ativo={forma === f} cor={COLORS.burgundy} onClick={() => setForma(f)}>{f}</Toggle>
+          ))}
+        </div>
+      </Field>
+      {boleto ? (
+        <Field label="Data prevista de recebimento da 1ª parcela">
+          <input type="date" style={inputStyle} value={dataBoleto} onChange={(e) => setDataBoleto(e.target.value)} />
+          <p className="text-[11px] mt-1" style={{ color: COLORS.inkSoft }}>
+            As próximas parcelas ficam previstas no mesmo dia dos meses seguintes. Você ajusta a data de cada boleto na lista.
+          </p>
+        </Field>
+      ) : (
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Cai todo dia">
+            <input type="number" min="1" max="31" inputMode="numeric" style={inputStyle} value={dia} onChange={(e) => setDia(e.target.value)} placeholder="Ex: 10" />
+          </Field>
+          <Field label="1ª parcela em">
+            <input type="month" style={inputStyle} value={mesEf} onChange={(e) => setMesInicio(e.target.value)} />
+          </Field>
+        </div>
+      )}
+      <Field label="Observações">
+        <input style={inputStyle} value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Opcional" />
+      </Field>
+      <p className="text-[11px] mb-2" style={{ color: COLORS.inkSoft }}>
+        O valor só entra no saldo da conta quando você confirma o recebimento de cada parcela.
+      </p>
+      {erro && <p className="text-xs mb-2" style={{ color: COLORS.red }}>{erro}</p>}
+      <PrimaryButton onClick={submit}>{item ? "Salvar alterações" : "Salvar recebimento fixo"}</PrimaryButton>
+    </Modal>
+  );
+}
+
+// Pergunta o dia em que o dinheiro realmente caiu (vira a data da entrada no extrato)
+function ConfirmarRecebParcelaModal({ rf, parcela, onClose, onConfirmar }) {
+  const [data, setData] = useState(todayStr());
+  return (
+    <Modal title="Confirmar recebimento" onClose={onClose}>
+      <p className="text-xs mb-3" style={{ color: COLORS.inkSoft }}>
+        Você recebeu <b>{fmtMoney(rf.valor)}</b> de <b>{rf.pagador}</b> (parcela {parcela.n}/{rf.parcelas})? O valor entra no saldo da conta nesta data.
+      </p>
+      <Field label="Recebi no dia">
+        <input type="date" style={inputStyle} value={data} onChange={(e) => setData(e.target.value)} autoFocus />
+      </Field>
+      <button onClick={() => onConfirmar(data || todayStr())} className="w-full mt-2 py-2.5 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: COLORS.green }}>
+        Confirmar recebimento
+      </button>
+    </Modal>
+  );
+}
+
+// Seção "Recebimentos fixos" que aparece dentro das contas (PF e PJ)
+function SecaoRecebFixos({ contas }) {
+  const ctx = React.useContext(RecebFixosCtx);
+  const [showAdd, setShowAdd] = useState(false);
+  const [editando, setEditando] = useState(null);
+  const [aberto, setAberto] = useState(null);
+  const [confirmando, setConfirmando] = useState(null); // { rf, parcela }
+  const hoje = todayStr();
+  const porId = {}; (contas || []).forEach((c) => { porId[c.id] = c; });
+  const lista = (ctx.lista || []).filter((rf) => porId[rf.contaId]);
+
+  let pendentes = 0, valorPend = 0;
+  lista.forEach((rf) => parcelasRF(rf).forEach((p) => { if (!p.paga) { pendentes++; valorPend += rf.valor; } }));
+
+  return (
+    <div className="mt-6 pt-5" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+      <div className="flex items-center justify-between mb-1">
+        <h3 className="text-sm font-semibold" style={{ color: COLORS.ink }}>Recebimentos fixos</h3>
+        <button onClick={() => setShowAdd(true)} disabled={!contas || contas.length === 0}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium"
+                style={{ backgroundColor: COLORS.camel + "1A", color: COLORS.camelDeep, opacity: (!contas || contas.length === 0) ? 0.5 : 1 }}>
+          <Plus size={13} color={COLORS.camelDeep} /> Novo recebimento
+        </button>
+      </div>
+      <p className="text-[11px] mb-3" style={{ color: COLORS.inkSoft }}>
+        Valores que você recebe todo mês, em parcelas. Só entram no saldo quando você confirma o recebimento.
+        {pendentes > 0 && <b> A receber: {fmtMoney(valorPend)} ({pendentes} parcela{pendentes > 1 ? "s" : ""}).</b>}
+      </p>
+
+      {lista.length === 0 && (
+        <p className="text-sm py-5 text-center rounded-lg" style={{ color: COLORS.inkSoft, backgroundColor: "#F1F3F6" }}>
+          {(!contas || contas.length === 0) ? "Cadastre uma conta primeiro." : "Nenhum recebimento fixo cadastrado."}
+        </p>
+      )}
+
+      <div className="space-y-2">
+        {lista.map((rf) => {
+          const ps = parcelasRF(rf);
+          const recebidas = ps.filter((p) => p.paga).length;
+          const proxima = ps.find((p) => !p.paga);
+          const abre = aberto === rf.id;
+          const atrasada = proxima && proxima.data < hoje;
+          return (
+            <div key={rf.id} className="rounded-lg" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
+              <div className="p-3 flex items-center gap-2">
+                <button onClick={() => setAberto(abre ? null : rf.id)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
+                  <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: COLORS.green + "1A" }}>
+                    <Repeat size={16} color={COLORS.green} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold truncate" style={{ color: COLORS.ink }}>{rf.pagador}</div>
+                    <div className="text-[11px]" style={{ color: COLORS.inkSoft }}>
+                      {rf.forma === "Boleto" ? "Boleto" : `${rf.forma} · todo dia ${rf.dia}`} · {porId[rf.contaId].nome}
+                    </div>
+                    <div className="text-[11px]" style={{ color: atrasada ? COLORS.red : COLORS.inkSoft }}>
+                      {recebidas} de {rf.parcelas} recebidas{proxima ? ` · próxima ${fmtDatePt(proxima.data)}${atrasada ? " (atrasada)" : ""}` : " · quitado ✓"}
+                    </div>
+                  </div>
+                </button>
+                <div className="text-sm font-bold flex-shrink-0 text-right" style={{ color: COLORS.green, fontFamily: "ui-monospace, monospace" }}>
+                  {fmtMoney(rf.valor)}
+                  <div className="text-[10px] font-normal" style={{ color: COLORS.inkSoft }}>por parcela</div>
+                </div>
+                <button onClick={() => setEditando(rf)} className="p-1.5 rounded-lg hover:bg-black/5 flex-shrink-0" title="Editar">
+                  <PenLine size={13} color={COLORS.inkSoft} />
+                </button>
+                <button onClick={() => { if (window.confirm(`Excluir o recebimento fixo de ${rf.pagador}? Os valores já recebidos saem do saldo da conta.`)) ctx.remove(rf.id); }}
+                        className="p-1.5 rounded-lg hover:bg-black/5 flex-shrink-0" title="Excluir">
+                  <Trash2 size={14} color={COLORS.inkSoft} />
+                </button>
+              </div>
+
+              {abre && (
+                <div className="px-3 pb-3">
+                  {ps.map((p) => {
+                    const venceu = !p.paga && p.data < hoje;
+                    return (
+                      <div key={p.n} className="flex items-center gap-2 py-1.5 text-xs flex-wrap" style={{ borderTop: `1px dashed ${COLORS.line}` }}>
+                        <span className="font-semibold" style={{ color: COLORS.ink, minWidth: 64 }}>Parcela {p.n}/{rf.parcelas}</span>
+                        {p.paga ? (
+                          <React.Fragment>
+                            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold" style={{ backgroundColor: COLORS.green + "1A", color: COLORS.green }}>RECEBIDO {fmtDatePt(p.paga)}</span>
+                            <button onClick={() => ctx.marcar(rf.id, p.n, null)} className="ml-auto text-[11px] underline" style={{ color: COLORS.inkSoft }}>desfazer</button>
+                          </React.Fragment>
+                        ) : (
+                          <React.Fragment>
+                            {rf.forma === "Boleto" ? (
+                              <input type="date" value={p.data} onChange={(e) => { if (e.target.value) ctx.previsao(rf.id, p.n, e.target.value); }}
+                                     className="px-1.5 py-1 rounded text-[11px]" style={{ border: `1px solid ${COLORS.line}`, color: venceu ? COLORS.red : COLORS.ink }}
+                                     title="Data prevista deste boleto" />
+                            ) : (
+                              <span style={{ color: venceu ? COLORS.red : COLORS.inkSoft }}>{fmtDatePt(p.data)}{venceu ? " · atrasada" : ""}</span>
+                            )}
+                            <button onClick={() => setConfirmando({ rf, parcela: p })}
+                                    className="ml-auto px-2 py-1 rounded-lg text-[11px] font-bold" style={{ backgroundColor: COLORS.green + "1A", color: COLORS.green }}>
+                              Recebi
+                            </button>
+                          </React.Fragment>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {rf.notas && <p className="text-[11px] mt-1.5" style={{ color: COLORS.inkSoft }}>{rf.notas}</p>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {showAdd && <AddRecebFixoModal contas={contas} onClose={() => setShowAdd(false)} onSave={ctx.add} />}
+      {editando && <AddRecebFixoModal contas={contas} item={editando} onClose={() => setEditando(null)} onSave={ctx.edit} />}
+      {confirmando && (
+        <ConfirmarRecebParcelaModal rf={confirmando.rf} parcela={confirmando.parcela} onClose={() => setConfirmando(null)}
+          onConfirmar={(data) => { ctx.marcar(confirmando.rf.id, confirmando.parcela.n, data); setConfirmando(null); }} />
+      )}
+    </div>
+  );
+}
+
 function ContasView({ contas, movimentacoes, onAddConta, onDeleteConta, onAddMov, onDeleteMov,
                       tipo, titulo, tituloTotal, mostrarTotal, fluxoNegocio, onSetPrincipal,
                       onExcluirAuto, onEditarAuto }) {
+  const rfCtx = React.useContext(RecebFixosCtx);
   const [showAddConta, setShowAddConta] = useState(false);
   const [movDaConta, setMovDaConta] = useState(null);
   const [aberta, setAberta] = useState(null);
@@ -2985,7 +3265,7 @@ function ContasView({ contas, movimentacoes, onAddConta, onDeleteConta, onAddMov
                           <div className="flex items-center gap-2 text-xs py-1.5">
                             <button onClick={() => setAcaoLanc(ativo ? null : m.id)} className="flex-1 min-w-0 truncate text-left hover:underline" style={{ color: COLORS.ink }} title="Toque para editar ou excluir">
                               {m.descricao || (m.tipo === "entrada" ? "Entrada" : "Saída")}
-                              {m.auto && <span className="ml-1 px-1 py-0.5 rounded text-[9px] font-bold" style={{ backgroundColor: COLORS.line, color: COLORS.inkSoft }}>auto</span>}
+                              {m.auto && <span className="ml-1 px-1 py-0.5 rounded text-[9px] font-bold" style={{ backgroundColor: COLORS.line, color: COLORS.inkSoft }}>{m.origem === "recebfixo" ? "fixo" : "auto"}</span>}
                             </button>
                             <div className="flex-shrink-0 text-right leading-tight">
                               <div className="font-bold" style={{ color: m.tipo === "entrada" ? COLORS.green : COLORS.red, fontFamily: "ui-monospace, monospace" }}>
@@ -2996,15 +3276,27 @@ function ContasView({ contas, movimentacoes, onAddConta, onDeleteConta, onAddMov
                           </div>
                           {ativo && (
                             <div className="flex items-center gap-1.5 pb-2 pl-1 flex-wrap">
-                              <button onClick={() => { setAcaoLanc(null); if (m.auto) { if (onEditarAuto) onEditarAuto(m); } else { setEditandoMov({ mov: m, conta: c }); } }}
-                                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold" style={{ backgroundColor: COLORS.burgundy + "12", color: COLORS.burgundy }}>
-                                <PenLine size={12} color={COLORS.burgundy} /> Editar
-                              </button>
-                              <button onClick={() => { setAcaoLanc(null); if (m.auto) { if (onExcluirAuto) onExcluirAuto(m); } else { onDeleteMov(m.id); } }}
-                                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold" style={{ backgroundColor: COLORS.red + "14", color: COLORS.red }}>
-                                <Trash2 size={12} color={COLORS.red} /> Excluir
-                              </button>
-                              {m.auto && <span className="text-[10px]" style={{ color: COLORS.inkSoft }}>mexe no recebimento/gasto de origem</span>}
+                              {m.origem === "recebfixo" ? (
+                                <React.Fragment>
+                                  <button onClick={() => { setAcaoLanc(null); rfCtx.marcar(m.origemId, m.parcela, null); }}
+                                          className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold" style={{ backgroundColor: COLORS.red + "14", color: COLORS.red }}>
+                                    <Trash2 size={12} color={COLORS.red} /> Desfazer recebimento
+                                  </button>
+                                  <span className="text-[10px]" style={{ color: COLORS.inkSoft }}>a parcela volta a ficar pendente (veja em Recebimentos fixos)</span>
+                                </React.Fragment>
+                              ) : (
+                                <React.Fragment>
+                                  <button onClick={() => { setAcaoLanc(null); if (m.auto) { if (onEditarAuto) onEditarAuto(m); } else { setEditandoMov({ mov: m, conta: c }); } }}
+                                          className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold" style={{ backgroundColor: COLORS.burgundy + "12", color: COLORS.burgundy }}>
+                                    <PenLine size={12} color={COLORS.burgundy} /> Editar
+                                  </button>
+                                  <button onClick={() => { setAcaoLanc(null); if (m.auto) { if (onExcluirAuto) onExcluirAuto(m); } else { onDeleteMov(m.id); } }}
+                                          className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold" style={{ backgroundColor: COLORS.red + "14", color: COLORS.red }}>
+                                    <Trash2 size={12} color={COLORS.red} /> Excluir
+                                  </button>
+                                  {m.auto && <span className="text-[10px]" style={{ color: COLORS.inkSoft }}>mexe no recebimento/gasto de origem</span>}
+                                </React.Fragment>
+                              )}
                             </div>
                           )}
                         </div>
@@ -3025,6 +3317,8 @@ function ContasView({ contas, movimentacoes, onAddConta, onDeleteConta, onAddMov
           );
         })}
       </div>
+
+      <SecaoRecebFixos contas={contas} />
 
       {showAddConta && <AddContaModal tipo={tipo} onClose={() => setShowAddConta(false)} onSave={onAddConta} />}
       {movDaConta && <AddMovimentacaoModal conta={movDaConta} onClose={() => setMovDaConta(null)} onSave={onAddMov} />}
@@ -3358,6 +3652,13 @@ function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes, car
   const saidasPF = soma(saidasPFItens, "valor");
   const totalPessoalPagar = despPessoais + totalFatura;
 
+  // Recebimentos fixos já confirmados nas contas da empresa (ficam à parte do "Resultado" dos atendimentos)
+  const idsPJ = {}; (contas || []).filter((c) => c.tipo === "pj").forEach((c) => { idsPJ[c.id] = true; });
+  const recebFixosPJItens = (movimentacoes || [])
+    .filter((m) => m.origem === "recebfixo" && idsPJ[m.contaId] && monthKey(m.data) === refMes)
+    .map((m) => ({ id: m.id, nome: m.descricao, data: m.data, valor: m.valor || 0 }));
+  const recebFixosPJ = soma(recebFixosPJItens, "valor");
+
   // ---------- SALDOS ----------
   const fluxoNegocio = fluxoNegocioConta(financeiro, despesas);
   const totalPJ = (contas || []).filter((c) => c.tipo === "pj")
@@ -3475,6 +3776,7 @@ function VisaoGeralFinanceiro({ financeiro, despesas, contas, movimentacoes, car
           <LinhaDetalhe chave="e-cus" rotulo="Custos dos atendimentos" valor={custos} itens={custoItens} cor={COLORS.red} />
           <LinhaDetalhe chave="e-gas" rotulo="Gastos da empresa" valor={gastos} itens={gastoItens} cor={COLORS.red} />
           <LinhaDetalhe chave="e-res" rotulo="Resultado do mês" valor={resultado} itens={[]} cor={resultado < 0 ? COLORS.red : COLORS.burgundy} forte />
+          <LinhaDetalhe chave="e-rfx" rotulo="Recebimentos fixos (à parte)" valor={recebFixosPJ} itens={recebFixosPJItens} cor={COLORS.green} />
         </div>
 
         <div className="rounded-lg p-4" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
@@ -4113,7 +4415,8 @@ function FormulariosView() {
 // Alerta de recebimento: certificados cuja previsão já chegou e ainda não foram recebidos.
 // "Ainda não" adia só por hoje — amanhã o alerta volta, até você confirmar.
 // Seguros ficam de fora de propósito (as seguradoras pagam em datas aleatórias).
-function AlertaRecebimento({ financeiro, onMarcarPago }) {
+function AlertaRecebimento({ financeiro, onMarcarPago, contas }) {
+  const rfCtx = React.useContext(RecebFixosCtx);
   const hoje = todayStr();
   const [adiados, setAdiados] = useState(() => {
     try { return JSON.parse(localStorage.getItem("recebAdiados") || "{}") || {}; } catch (e) { return {}; }
@@ -4123,11 +4426,22 @@ function AlertaRecebimento({ financeiro, onMarcarPago }) {
     setAdiados(novo);
     try { localStorage.setItem("recebAdiados", JSON.stringify(novo)); } catch (e) {}
   };
-  const aReceber = (financeiro || [])
+  // Certificados com previsão chegada + parcelas de recebimentos fixos (PF e PJ) que já venceram e não foram confirmadas
+  const itens = (financeiro || [])
     .filter((f) => f.categoria === "certificado" && !f.pago && f.data && f.data <= hoje && aposMarcoZero(f.data) && adiados[f.id] !== hoje)
-    .sort((a, b) => String(a.data).localeCompare(String(b.data)));
+    .map((f) => ({ id: f.id, nome: f.cliente, forma: f.forma, data: f.data, valor: f.valorPago || 0, confirmar: () => onMarcarPago(f.id) }));
+  const idsContas = {}; (contas || []).forEach((c) => { idsContas[c.id] = true; });
+  ((rfCtx && rfCtx.lista) || []).forEach((rf) => {
+    if (!idsContas[rf.contaId]) return;
+    parcelasRF(rf).forEach((p) => {
+      if (p.paga || p.data > hoje || adiados[p.id] === hoje) return;
+      itens.push({ id: p.id, nome: `${rf.pagador} · parcela ${p.n}/${rf.parcelas}`, forma: rf.forma, data: p.data, valor: rf.valor,
+                   confirmar: () => rfCtx.marcar(rf.id, p.n, hoje) });
+    });
+  });
+  const aReceber = itens.sort((a, b) => String(a.data).localeCompare(String(b.data)));
   if (aReceber.length === 0) return null;
-  const total = aReceber.reduce((s, f) => s + (f.valorPago || 0), 0);
+  const total = aReceber.reduce((s, f) => s + f.valor, 0);
 
   return (
     <div className="rounded-lg mb-4 overflow-hidden" style={{ border: `1.5px solid ${COLORS.green}`, backgroundColor: "#fff" }}>
@@ -4142,18 +4456,18 @@ function AlertaRecebimento({ financeiro, onMarcarPago }) {
           <div key={f.id} className="py-2.5" style={{ borderTop: `1px dashed ${COLORS.line}` }}>
             <div className="flex items-center gap-2">
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold truncate" style={{ color: COLORS.ink }}>{f.cliente}</div>
+                <div className="text-sm font-semibold truncate" style={{ color: COLORS.ink }}>{f.nome}</div>
                 <div className="text-[11px]" style={{ color: f.data === hoje ? COLORS.inkSoft : COLORS.red }}>
                   {f.forma ? f.forma + " · " : ""}
                   {f.data === hoje ? "recebimento hoje" : `previsto em ${fmtDatePt(f.data)}`}
                 </div>
               </div>
               <div className="text-sm font-bold flex-shrink-0" style={{ color: COLORS.green, fontFamily: "ui-monospace, monospace" }}>
-                {fmtMoney(f.valorPago)}
+                {fmtMoney(f.valor)}
               </div>
             </div>
             <div className="flex gap-2 mt-2">
-              <button onClick={() => onMarcarPago(f.id)}
+              <button onClick={f.confirmar}
                       className="flex-1 py-1.5 rounded-lg text-[11px] font-bold text-white"
                       style={{ backgroundColor: COLORS.green }}>
                 Confirmar recebimento
@@ -4206,7 +4520,7 @@ function DashboardView({ atendimentos, clientes, financeiro, agendamentos, despe
       <h2 className="text-lg font-semibold" style={{ color: COLORS.ink, letterSpacing: "-0.2px" }}>Dashboard</h2>
       <p className="text-xs mb-4 capitalize" style={{ color: COLORS.inkSoft }}>{hojeExtenso()}</p>
 
-      <AlertaRecebimento financeiro={financeiro} onMarcarPago={onMarcarPago} />
+      <AlertaRecebimento financeiro={financeiro} onMarcarPago={onMarcarPago} contas={contas} />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         {tiles.map((t, i) => (
@@ -4263,7 +4577,7 @@ function DashboardView({ atendimentos, clientes, financeiro, agendamentos, despe
 // ====== BACKUP DOS DADOS ======
 function BackupModal({ dados, onRestaurar, onClose }) {
   const { atendimentos, agendamentos, financeiro, despesas, cartoes, comprasCartao, clientes,
-          contas = [], movimentacoes = [], contatos = [], pagamentosFatura = [] } = dados;
+          contas = [], movimentacoes = [], contatos = [], pagamentosFatura = [], recebimentosFixos = [] } = dados;
   const [restaurando, setRestaurando] = useState(false);
   const [progresso, setProgresso] = useState({ feitos: 0, total: 0 });
   const fileRef = React.useRef(null);
@@ -4272,7 +4586,7 @@ function BackupModal({ dados, onRestaurar, onClose }) {
     const pacote = {
       geradoEm: new Date().toISOString(),
       atendimentos, agendamentos, financeiro, despesas, cartoes, comprasCartao, clientes,
-      contas, movimentacoes, contatos, pagamentosFatura,
+      contas, movimentacoes, contatos, pagamentosFatura, recebimentosFixos,
       telefonesWhatsApp: getTelefones(),
     };
     baixarArquivo(`backup-inove-${carimboData()}.json`, JSON.stringify(pacote, null, 2), "application/json");
@@ -4512,6 +4826,7 @@ function App() {
   const [movimentacoes, setMovimentacoes] = useState([]);
   const [pagamentosFatura, setPagamentosFatura] = useState([]);
   const [anexos, setAnexos] = useState([]);
+  const [recebFixos, setRecebFixos] = useState([]);
   const [mesKanban, setMesKanban] = useState(monthKey(todayStr()));
   const [showBackup, setShowBackup] = useState(false);
 
@@ -4599,7 +4914,7 @@ function App() {
   const carregarTudo = async () => {
     setLoading(true); setErro("");
     try {
-      const [a, ag, f, d, ct, cc, cl, cn, mv, pf, cont, anx] = await Promise.all([
+      const [a, ag, f, d, ct, cc, cl, cn, mv, pf, cont, anx, rfx] = await Promise.all([
         apiGet("/api/atendimentos"), apiGet("/api/agendamentos"), apiGet("/api/financeiro"),
         apiGet("/api/despesas").catch(() => []),
         apiGet("/api/cartoes").catch(() => []),
@@ -4610,6 +4925,7 @@ function App() {
         apiGet("/api/pagamentos-fatura").catch(() => []),
         apiGet("/api/contatos").catch(() => []),
         apiGet("/api/anexos").catch(() => []),
+        apiGet("/api/recebimentos-fixos").catch(() => []),
       ]);
       const ats = a.map(mapAtendimento);
       const cls = cl.map(mapCliente);
@@ -4628,6 +4944,7 @@ function App() {
       setMovimentacoes(mv.map(mapMovimentacao));
       setPagamentosFatura(pf.map(mapPagamentoFatura));
       setAnexos((anx || []).map(mapAnexo));
+      setRecebFixos((rfx || []).map(mapRecebFixo));
       await sincronizarClientesEmitidos(ats, cls);
       await semearContatos(ats, cls, conts);
       await limparFinanceiroNaoFechado(ats, fins);
@@ -4652,6 +4969,7 @@ function App() {
       ["/api/contas", pacote.contas],
       ["/api/movimentacoes", pacote.movimentacoes],
       ["/api/pagamentos-fatura", pacote.pagamentosFatura],
+      ["/api/recebimentos-fixos", pacote.recebimentosFixos],
     ];
     const total = grupos.reduce((s, [, arr]) => s + ((arr || []).length), 0);
     let feitos = 0, erros = 0;
@@ -5099,6 +5417,46 @@ function App() {
     try { await apiDelete(`/api/movimentacoes/${id}`); }
     catch (e) { console.error(e); setErro("Não foi possível excluir a movimentação."); }
   };
+  // ----- Recebimentos fixos (parcelas a receber nas contas) -----
+  const addRecebFixo = async (item) => {
+    setRecebFixos((prev) => [...prev, item]);
+    try { await apiPost("/api/recebimentos-fixos", item); }
+    catch (e) { console.error(e); setErro("Não foi possível salvar o recebimento fixo."); }
+  };
+  const editRecebFixo = async (item) => {
+    setRecebFixos((prev) => prev.map((x) => (x.id === item.id ? item : x)));
+    try { await apiPatch(`/api/recebimentos-fixos/${item.id}`, item); }
+    catch (e) { console.error(e); setErro("Não foi possível salvar as alterações."); }
+  };
+  const deleteRecebFixo = async (id) => {
+    setRecebFixos((prev) => prev.filter((x) => x.id !== id));
+    try { await apiDelete(`/api/recebimentos-fixos/${id}`); }
+    catch (e) { console.error(e); setErro("Não foi possível excluir o recebimento fixo."); }
+  };
+  // Confirma (data = dia em que caiu) ou desfaz (data = null) o recebimento da parcela n
+  const marcarParcelaRecebFixo = async (id, n, data) => {
+    const rf = recebFixos.find((x) => x.id === id);
+    if (!rf) return;
+    const pagas = { ...(rf.pagas || {}) };
+    if (data) pagas[String(n)] = data; else delete pagas[String(n)];
+    setRecebFixos((prev) => prev.map((x) => (x.id === id ? { ...x, pagas } : x)));
+    try { await apiPatch(`/api/recebimentos-fixos/${id}`, { pagas }); }
+    catch (e) { console.error(e); setErro("Não foi possível atualizar o recebimento."); }
+  };
+  // Ajusta a data prevista de uma parcela (usado nos boletos)
+  const setPrevisaoRecebFixo = async (id, n, data) => {
+    const rf = recebFixos.find((x) => x.id === id);
+    if (!rf) return;
+    const datasPrevistas = { ...(rf.datasPrevistas || {}), [String(n)]: data };
+    setRecebFixos((prev) => prev.map((x) => (x.id === id ? { ...x, datasPrevistas } : x)));
+    try { await apiPatch(`/api/recebimentos-fixos/${id}`, { datasPrevistas }); }
+    catch (e) { console.error(e); setErro("Não foi possível salvar a data prevista."); }
+  };
+  const rfCtxValue = { lista: recebFixos, add: addRecebFixo, edit: editRecebFixo, remove: deleteRecebFixo,
+                       marcar: marcarParcelaRecebFixo, previsao: setPrevisaoRecebFixo };
+  // Só o que foi CONFIRMADO como recebido entra no saldo das contas (vira uma entrada na data do recebimento)
+  const movimentacoesComRF = [...movimentacoes, ...movsDeRecebFixos(recebFixos)];
+
   // ----- Anexos dos clientes -----
   const addAnexo = async (item) => {
     const salvo = await apiPost("/api/anexos", item); // pode lançar erro (arquivo grande demais)
@@ -5188,6 +5546,7 @@ function App() {
   );
 
   return (
+    <RecebFixosCtx.Provider value={rfCtxValue}>
     <div className="min-h-screen" style={{
       backgroundColor: COLORS.bg,
       backgroundImage: `linear-gradient(rgba(244,246,249,0.90), rgba(244,246,249,0.90)), url(${WATERMARK_B64})`,
@@ -5224,7 +5583,7 @@ function App() {
             <button onClick={carregarTudo} className="font-semibold underline flex-shrink-0">Tentar de novo</button>
           </div>
         )}
-        {tab === "dashboard" && <DashboardView atendimentos={atendimentos} clientes={clientes} financeiro={financeiro} agendamentos={agendamentos} despesas={despesas} contas={contas} movimentacoes={movimentacoes} cartoes={cartoes} comprasCartao={comprasCartao} pagamentosFatura={pagamentosFatura} onMarcarPago={marcarPago} onIr={setTab} />}
+        {tab === "dashboard" && <DashboardView atendimentos={atendimentos} clientes={clientes} financeiro={financeiro} agendamentos={agendamentos} despesas={despesas} contas={contas} movimentacoes={movimentacoesComRF} cartoes={cartoes} comprasCartao={comprasCartao} pagamentosFatura={pagamentosFatura} onMarcarPago={marcarPago} onIr={setTab} />}
         {tab === "kanban" && <KanbanBoard atendimentos={atendimentos} onAdd={addAtendimento} onMove={moveAtendimento} onDelete={deleteAtendimento} onEdit={editAtendimento} clientes={clientes} mesKanban={mesKanban} financeiro={financeiro} />}
         {tab === "calendario" && <CalendarView agendamentos={agendamentos} onAdd={addAgendamento} onDelete={deleteAgendamento} />}
         {tab === "financeiro" && (
@@ -5232,7 +5591,7 @@ function App() {
             financeiro={financeiro} onAddFinanceiro={addFinanceiro} onEditFinanceiro={editFinanceiro}
             onDeleteFinanceiro={deleteFinanceiro} onMarcarPago={marcarPago}
             despesas={despesas} onAddDespesa={addDespesa} onEditDespesa={editDespesa} onDeleteDespesa={deleteDespesa} onMarcarMesPagoDespesa={marcarMesPagoDespesa}
-            contas={contas} movimentacoes={movimentacoes} onAddConta={addConta} onDeleteConta={deleteConta}
+            contas={contas} movimentacoes={movimentacoesComRF} onAddConta={addConta} onDeleteConta={deleteConta}
             onAddMov={addMovimentacao} onDeleteMov={deleteMovimentacao} onSetPrincipal={definirContaPrincipal}
             pagamentosFatura={pagamentosFatura} onPagarFatura={pagarFatura} onDesfazerPagamento={desfazerPagamentoFatura}
             cartoes={cartoes} comprasCartao={comprasCartao} onAddCartao={addCartao} onDeleteCartao={deleteCartao}
@@ -5259,12 +5618,13 @@ function App() {
 
       {showBackup && (
         <BackupModal
-          dados={{ atendimentos, agendamentos, financeiro, despesas, cartoes, comprasCartao, clientes, contas, movimentacoes, contatos, pagamentosFatura }}
+          dados={{ atendimentos, agendamentos, financeiro, despesas, cartoes, comprasCartao, clientes, contas, movimentacoes, contatos, pagamentosFatura, recebimentosFixos: recebFixos }}
           onRestaurar={restaurarBackup}
           onClose={() => setShowBackup(false)}
         />
       )}
     </div>
+    </RecebFixosCtx.Provider>
   );
 }
 

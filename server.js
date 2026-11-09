@@ -1088,6 +1088,78 @@ app.delete("/api/movimentacoes/:id", async (req, res) => {
   }
 });
 
+// ---------- RECEBIMENTOS FIXOS (parcelas a receber, dentro das contas PF e PJ) ----------
+// datas_previstas = {"3":"2026-12-15"} (ajuste de data de uma parcela, usado nos boletos)
+// pagas           = {"1":"2026-11-10"}  (parcela -> dia em que foi recebida; só estas entram no saldo)
+function jsonObj(v) { return JSON.stringify(v && typeof v === "object" && !Array.isArray(v) ? v : {}); }
+
+app.get("/api/recebimentos-fixos", async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM recebimentos_fixos ORDER BY criado_em");
+    res.json(rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao buscar recebimentos fixos" });
+  }
+});
+
+app.post("/api/recebimentos-fixos", async (req, res) => {
+  const { id, contaId, pagador, valor, parcelas, forma, dia, primeiraData, datasPrevistas, pagas, notas } = req.body;
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO recebimentos_fixos (id, conta_id, pagador, valor, parcelas, forma, dia, primeira_data, datas_previstas, pagas, notas)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [id, contaId || null, pagador || null, valor || 0, parcelas || 1, forma || null, dia || null, primeiraData || null,
+       jsonObj(datasPrevistas), jsonObj(pagas), notas || null]
+    );
+    res.status(201).json(rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao criar recebimento fixo" });
+  }
+});
+
+app.patch("/api/recebimentos-fixos/:id", async (req, res) => {
+  const b = req.body;
+  const fields = {
+    conta_id: b.contaId,
+    pagador: b.pagador,
+    valor: b.valor,
+    parcelas: b.parcelas,
+    forma: b.forma,
+    dia: b.dia,
+    primeira_data: b.primeiraData,
+    datas_previstas: b.datasPrevistas !== undefined ? jsonObj(b.datasPrevistas) : undefined,
+    pagas: b.pagas !== undefined ? jsonObj(b.pagas) : undefined,
+    notas: b.notas,
+  };
+  const keys = Object.keys(fields).filter((k) => fields[k] !== undefined);
+  if (keys.length === 0) return res.status(400).json({ error: "Nada para atualizar" });
+  const setClause = keys.map((k, i) => `${k} = $${i + 1}`).join(", ");
+  const values = keys.map((k) => fields[k]);
+  values.push(req.params.id);
+  try {
+    const { rows } = await pool.query(
+      `UPDATE recebimentos_fixos SET ${setClause} WHERE id = $${values.length} RETURNING *`,
+      values
+    );
+    res.json(rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao atualizar recebimento fixo" });
+  }
+});
+
+app.delete("/api/recebimentos-fixos/:id", async (req, res) => {
+  try {
+    await pool.query("DELETE FROM recebimentos_fixos WHERE id = $1", [req.params.id]);
+    res.status(204).end();
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao excluir recebimento fixo" });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`API rodando na porta ${PORT}`);
