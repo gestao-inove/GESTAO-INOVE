@@ -1559,6 +1559,9 @@ function EditFinanceModal({ item, onClose, onSave }) {
 
 // Gastos da empresa (despesas com tipo negocio_*). Avulso conta só no mês; conta fixa recorre a partir do início.
 function ehGastoNegocio(d) { return d.tipo === "negocio_avulso" || d.tipo === "negocio_fixa"; }
+// Aparece no rodapé do menu lateral: serve pra conferir se o navegador está mostrando a versão mais nova
+const VERSAO_PAINEL = "09/11 · recebimento fixo na aba Fixas";
+
 // ====== MARCO ZERO ======
 // A partir deste mês o financeiro recomeça do zero, SEM apagar nada: o que veio de antes
 // (contas fixas recorrentes, recebíveis atrasados, alertas) fica "congelado" nos meses anteriores
@@ -3020,7 +3023,7 @@ function ConfirmarRecebParcelaModal({ rf, parcela, onClose, onConfirmar }) {
 }
 
 // Seção "Recebimentos fixos" que aparece dentro das contas (PF e PJ)
-function SecaoRecebFixos({ contas }) {
+function SecaoRecebFixos({ contas, compacto }) {
   const ctx = React.useContext(RecebFixosCtx);
   const [showAdd, setShowAdd] = useState(false);
   const [editando, setEditando] = useState(null);
@@ -3034,7 +3037,7 @@ function SecaoRecebFixos({ contas }) {
   lista.forEach((rf) => parcelasRF(rf).forEach((p) => { if (!p.paga) { pendentes++; valorPend += rf.valor; } }));
 
   return (
-    <div className="mt-6 pt-5" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+    <div className={compacto ? "" : "mt-6 pt-5"} style={compacto ? undefined : { borderTop: `1px solid ${COLORS.line}` }}>
       <div className="flex items-center justify-between mb-1">
         <h3 className="text-sm font-semibold" style={{ color: COLORS.ink }}>Recebimentos fixos</h3>
         <button onClick={() => setShowAdd(true)} disabled={!contas || contas.length === 0}
@@ -3141,7 +3144,7 @@ function SecaoRecebFixos({ contas }) {
 
 function ContasView({ contas, movimentacoes, onAddConta, onDeleteConta, onAddMov, onDeleteMov,
                       tipo, titulo, tituloTotal, mostrarTotal, fluxoNegocio, onSetPrincipal,
-                      onExcluirAuto, onEditarAuto }) {
+                      onExcluirAuto, onEditarAuto, semRecebFixos }) {
   const rfCtx = React.useContext(RecebFixosCtx);
   const [showAddConta, setShowAddConta] = useState(false);
   const [movDaConta, setMovDaConta] = useState(null);
@@ -3318,7 +3321,7 @@ function ContasView({ contas, movimentacoes, onAddConta, onDeleteConta, onAddMov
         })}
       </div>
 
-      <SecaoRecebFixos contas={contas} />
+      {!semRecebFixos && <SecaoRecebFixos contas={contas} />}
 
       {showAddConta && <AddContaModal tipo={tipo} onClose={() => setShowAddConta(false)} onSave={onAddConta} />}
       {movDaConta && <AddMovimentacaoModal conta={movDaConta} onClose={() => setMovDaConta(null)} onSave={onAddMov} />}
@@ -3344,6 +3347,7 @@ function DespesasView({ despesas: despesasTodas, onAdd, onEdit, onDelete, totalR
   });
   const totalPorTipo = (key) => despesas.filter((d) => d.tipo === key).reduce((s, d) => s + (d.valor || 0), 0);
   const [subTab, setSubTab] = useState("contas");
+  const [fixaModo, setFixaModo] = useState("despesa"); // na aba Fixas: "despesa" ou "recebimento"
   const [mesDetalhe, setMesDetalhe] = useState(null);
   const [despAberto, setDespAberto] = useState(true);
   const refMes = monthKey(todayStr());
@@ -3444,7 +3448,7 @@ function DespesasView({ despesas: despesasTodas, onAdd, onEdit, onDelete, totalR
 
       {subTab === "contas" && (
         <ContasView contas={contasPF} movimentacoes={movimentacoes || []}
-                    tipo="pf" titulo="Suas contas pessoais" tituloTotal="Total nas suas contas (PF)"
+                    tipo="pf" titulo="Suas contas pessoais" tituloTotal="Total nas suas contas (PF)" semRecebFixos
                     onAddConta={onAddConta} onDeleteConta={onDeleteConta}
                     onAddMov={onAddMov} onDeleteMov={onDeleteMov} />
       )}
@@ -3456,7 +3460,22 @@ function DespesasView({ despesas: despesasTodas, onAdd, onEdit, onDelete, totalR
                      onPagarFatura={onPagarFatura} onDesfazerPagamento={onDesfazerPagamento} />
       )}
 
-      {(subTab === "avulso" || subTab === "fixa") && (
+      {subTab === "fixa" && (
+        <div className="flex gap-1 p-1 rounded-lg mb-4" style={{ backgroundColor: "#F1F3F6" }}>
+          {[["despesa", "Despesa fixa"], ["recebimento", "Recebimento fixo"]].map(([k, rot]) => (
+            <button key={k} onClick={() => setFixaModo(k)} className="flex-1 py-2 rounded-lg text-xs font-semibold"
+                    style={{ backgroundColor: fixaModo === k ? "#fff" : "transparent",
+                             color: fixaModo === k ? (k === "recebimento" ? COLORS.green : COLORS.burgundy) : COLORS.inkSoft,
+                             boxShadow: fixaModo === k ? "0 1px 2px rgba(0,0,0,0.08)" : "none" }}>
+              {rot}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {subTab === "fixa" && fixaModo === "recebimento" && <SecaoRecebFixos contas={contasPF} compacto />}
+
+      {(subTab === "avulso" || (subTab === "fixa" && fixaModo === "despesa")) && (
         <div>
           <div className="flex items-center justify-between mb-4">
             <Card titulo={subTab === "avulso" ? "Total avulsos" : "Total fixas"} valor={subTab === "avulso" ? totalAvulso : totalFixa}
@@ -5541,6 +5560,7 @@ function App() {
         <button onClick={() => { SESSION_TOKEN = null; setLogado(false); }} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-left hover:bg-white/5" style={{ color: "#9FB0CC" }}>
           <LogOut size={16} color="#9FB0CC" /> Sair
         </button>
+        <div className="px-3 pt-2 text-[10px]" style={{ color: "#6F84A8" }}>Versão {VERSAO_PAINEL}</div>
       </div>
     </div>
   );
