@@ -11,8 +11,27 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }, // necessário para conectar no Aiven
 });
 
+// O Aiven derruba conexões paradas. Sem este tratamento, a queda de uma conexão ociosa
+// vira erro não tratado e DERRUBA o servidor inteiro; com ele, o pool só descarta a
+// conexão e abre outra no próximo pedido.
+pool.on("error", (e) => console.error("[banco] conexão ociosa caiu:", e.message));
+
 // ---------- healthcheck ----------
 app.get("/", (req, res) => res.send("API do Painel da Corretora no ar."));
+
+// ---------- saúde (robô monitor) ----------
+// É ESTE endereço que o robô monitor deve visitar a cada 5 min: mantém o Render acordado
+// e confere o banco. Público e sem dado nenhum (só se está de pé).
+const { iniciarPulso, situacaoDoPulso } = require("./pulso");
+app.get("/saude", async (req, res) => {
+  const inicio = Date.now();
+  try {
+    await pool.query("SELECT 1");
+    res.json({ ok: true, banco: { ok: true, ms: Date.now() - inicio }, pulso: situacaoDoPulso() });
+  } catch (e) {
+    res.status(503).json({ ok: false, banco: { ok: false }, pulso: situacaoDoPulso() });
+  }
+});
 
 // ---------- AUTENTICAÇÃO ----------
 const crypto = require("crypto");
@@ -1164,4 +1183,6 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`API rodando na porta ${PORT}`);
   registrarWebhookTelegram();
+  // Banco do Aiven acordado: grava e apaga uma linha a cada 6 h (ver pulso.js).
+  iniciarPulso(pool);
 });
