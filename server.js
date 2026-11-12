@@ -33,6 +33,10 @@ app.get("/saude", async (req, res) => {
   }
 });
 
+// ---------- conector com a Central de Atendimento (WhatsApp) ----------
+// Rotas em /conector (fora do login do painel, com token próprio). Ver conector.js.
+require("./conector").registrarConector(app, pool);
+
 // ---------- AUTENTICAÇÃO ----------
 const crypto = require("crypto");
 
